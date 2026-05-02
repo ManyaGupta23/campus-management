@@ -25,7 +25,7 @@ SCHEMA = {
 }
 
 # =========================
-# CREATE FILE
+# CREATE FILE IF NOT EXISTS
 # =========================
 def create_file():
     with pd.ExcelWriter(FILE_NAME, engine="openpyxl") as writer:
@@ -62,6 +62,16 @@ def save_data(db):
     st.session_state.db = load_data()
 
 # =========================
+# GRADE
+# =========================
+def get_grade(m):
+    if m >= 90: return "A+"
+    elif m >= 75: return "A"
+    elif m >= 60: return "B"
+    elif m >= 40: return "C"
+    return "F"
+
+# =========================
 # SESSION INIT
 # =========================
 if "db" not in st.session_state:
@@ -85,9 +95,9 @@ if not st.session_state.logged_in:
     if st.button("Login"):
         users = st.session_state.db["users"]
 
-        users["username"] = users["username"].astype(str)
-        users["password"] = users["password"].astype(str)
-        users["role"] = users["role"].astype(str)
+        users["username"] = users["username"].astype(str).str.strip()
+        users["password"] = users["password"].astype(str).str.strip()
+        users["role"] = users["role"].astype(str).str.strip()
 
         u = str(u).strip()
         p = str(p).strip()
@@ -110,7 +120,7 @@ if not st.session_state.logged_in:
                 st.session_state.role = r
 
                 if r.lower() == "student":
-                    st.session_state.link_id = str(match.iloc[0]["student_id"])
+                    st.session_state.link_id = str(match.iloc[0]["student_id"]).strip()
 
                 st.rerun()
             else:
@@ -141,7 +151,7 @@ else:
 
     # ================= STUDENTS =================
     elif choice == "Students":
-        st.title("Students List")
+        st.title("Students Data")
         st.dataframe(db["students"])
 
     # ================= ANALYTICS =================
@@ -154,7 +164,7 @@ else:
         else:
             st.warning("No data")
 
-    # ================= MARKS =================
+    # ================= MARKS ENTRY =================
     elif choice == "Marks Entry":
         st.title("Marks Entry")
 
@@ -163,13 +173,14 @@ else:
         m = st.number_input("Marks",0,100)
 
         if st.button("Save"):
-            grade = "A+" if m>=90 else "A" if m>=75 else "B" if m>=60 else "C" if m>=40 else "F"
+            grade = get_grade(m)
 
             new = pd.DataFrame([[sid,sub,m,grade]],
                                columns=SCHEMA["results"])
 
             db["results"] = pd.concat([db["results"],new], ignore_index=True)
             save_data(db)
+
             st.success("Saved")
             st.rerun()
 
@@ -187,26 +198,29 @@ else:
 
             db["attendance"] = pd.concat([db["attendance"],new], ignore_index=True)
             save_data(db)
+
             st.success("Saved")
             st.rerun()
 
-    # ================= REPORT CARD =================
+    # ================= REPORT CARD (FIXED) =================
     elif choice == "My Results":
         st.title("🎓 Student Report Card")
 
         df = db["results"].copy()
 
-        # CLEAN DATA (IMPORTANT FIX)
+        # 🔥 FINAL FIX (IMPORTANT)
         df["student_id"] = df["student_id"].astype(str).str.strip().str.replace(".0","",regex=False)
 
-        sid = str(st.session_state.link_id).strip()
+        sid = str(st.session_state.link_id).strip().replace(".0","")
 
         student_df = df[df["student_id"] == sid]
 
-        # ================= NO RESULT =================
+        # DEBUG (optional)
+        st.write("DEBUG LOGIN ID:", sid)
+
         if student_df.empty:
             st.error("❌ No result found for your Student ID")
-            st.info("Contact faculty to add marks")
+            st.info("👉 Check if marks are added in Faculty panel")
         else:
             st.success("🎉 Report Card Loaded")
 
@@ -214,7 +228,7 @@ else:
             ### 🏫 Campus ERP Report Card  
             **Student ID:** {sid}  
             **Date:** {datetime.today().date()}  
-            ---  
+            ---
             """)
 
             st.table(student_df)
@@ -223,18 +237,17 @@ else:
             avg = student_df["marks"].mean()
 
             col1, col2 = st.columns(2)
-
-            col1.metric("📊 Total Marks", int(total))
+            col1.metric("📊 Total", int(total))
             col2.metric("📈 Average", round(avg,2))
 
             if avg >= 75:
-                st.success("Excellent Performance ⭐")
+                st.success("Excellent ⭐")
             elif avg >= 60:
-                st.info("Good Performance 👍")
+                st.info("Good 👍")
             elif avg >= 40:
-                st.warning("Average Performance ⚠️")
+                st.warning("Average ⚠️")
             else:
-                st.error("Needs Improvement ❌")
+                st.error("Poor ❌")
 
     # ================= LOGOUT =================
     elif choice == "Logout":
