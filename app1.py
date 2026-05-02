@@ -36,7 +36,7 @@ def create_file():
             pd.DataFrame(columns=cols).to_excel(writer, sheet_name=sheet, index=False)
 
 # =========================
-# SAFE LOAD (FIXED)
+# LOAD DATA (SAFE)
 # =========================
 def load_data():
     db = {}
@@ -55,7 +55,7 @@ def load_data():
     return db
 
 # =========================
-# SAVE DATA (FIXED)
+# SAVE DATA
 # =========================
 def save_data(db):
     with pd.ExcelWriter(FILE_NAME, engine="openpyxl", mode="w") as writer:
@@ -65,7 +65,7 @@ def save_data(db):
     st.session_state.db = load_data()
 
 # =========================
-# GRADE
+# GRADE SYSTEM
 # =========================
 def get_grade(m):
     if m >= 90: return "A+"
@@ -87,7 +87,7 @@ if "logged_in" not in st.session_state:
     st.session_state.link_id = None
 
 # =========================
-# LOGIN PAGE (FIXED)
+# LOGIN
 # =========================
 if not st.session_state.logged_in:
     st.title("🏫 Campus ERP Login")
@@ -103,11 +103,11 @@ if not st.session_state.logged_in:
         users["password"] = users["password"].astype(str)
         users["role"] = users["role"].astype(str)
 
-        u = str(u)
-        p = str(p)
-        r = str(r)
+        u = str(u).strip()
+        p = str(p).strip()
+        r = str(r).strip()
 
-        # Admin login
+        # ADMIN LOGIN
         if u == "admin" and p == "admin123":
             st.session_state.logged_in = True
             st.session_state.role = "Admin"
@@ -126,16 +126,16 @@ if not st.session_state.logged_in:
                 st.session_state.user = u
 
                 if r.lower() == "student":
-                    st.session_state.link_id = str(match.iloc[0]["student_id"])
+                    st.session_state.link_id = str(match.iloc[0]["student_id"]).strip()
                 elif r.lower() == "faculty":
-                    st.session_state.link_id = str(match.iloc[0]["faculty_id"])
+                    st.session_state.link_id = str(match.iloc[0]["faculty_id"]).strip()
 
                 st.rerun()
             else:
                 st.error("Invalid login")
 
 # =========================
-# MAIN SYSTEM
+# MAIN APP
 # =========================
 else:
     st.sidebar.title(f"Role: {st.session_state.role}")
@@ -163,17 +163,9 @@ else:
         df = db["students"]
         st.dataframe(df)
 
-        st.subheader("Add Student")
         sid = st.text_input("ID")
         name = st.text_input("Name")
-        gender = st.text_input("Gender")
         course = st.text_input("Course")
-        year = st.text_input("Year")
-        section = st.text_input("Section")
-        admission_date = st.text_input("Admission Date")
-        attendance_percentage = st.text_input("Attendance Percentage")
-        status = st.text_input("Status")
-        email = st.text_input("Email")
 
         if st.button("Add"):
             new = pd.DataFrame([[sid,name,None,course,None,None,str(datetime.today().date()),0,"Active",None]],
@@ -183,11 +175,10 @@ else:
             st.success("Added")
             st.rerun()
 
-        st.subheader("Delete Student")
-        did = st.text_input("Delete ID")
+        del_id = st.text_input("Delete ID")
 
         if st.button("Delete"):
-            db["students"] = df[df["student_id"] != did]
+            db["students"] = df[df["student_id"] != del_id]
             save_data(db)
             st.success("Deleted")
             st.rerun()
@@ -195,6 +186,7 @@ else:
     # ================= ANALYTICS =================
     elif choice == "Analytics":
         st.title("Analytics")
+
         res = db["results"]
 
         if not res.empty:
@@ -202,7 +194,7 @@ else:
         else:
             st.warning("No data")
 
-    # ================= FACULTY =================
+    # ================= MARKS =================
     elif choice == "Marks Entry":
         st.title("Marks Entry")
 
@@ -242,8 +234,12 @@ else:
         st.title("My Results")
 
         df = db["results"]
-        if st.session_state.link_id:
-            df = df[df["student_id"].astype(str) == str(st.session_state.link_id)]
+
+        # 🔥 FINAL FIX (IMPORTANT)
+        df["student_id"] = df["student_id"].astype(str).str.strip().str.replace(".0","")
+        sid = str(st.session_state.link_id).strip()
+
+        df = df[df["student_id"] == sid]
 
         st.dataframe(df)
 
