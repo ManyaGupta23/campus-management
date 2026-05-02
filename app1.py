@@ -3,9 +3,6 @@ import pandas as pd
 import os
 from datetime import datetime
 import plotly.express as px
-from io import BytesIO
-from reportlab.pdfgen import canvas
-import qrcode
 
 # =========================
 # CONFIG
@@ -28,7 +25,7 @@ SCHEMA = {
 }
 
 # =========================
-# CREATE FILE
+# CREATE FILE IF NOT EXISTS
 # =========================
 def create_file():
     with pd.ExcelWriter(FILE_NAME, engine="openpyxl") as writer:
@@ -36,7 +33,7 @@ def create_file():
             pd.DataFrame(columns=cols).to_excel(writer, sheet_name=sheet, index=False)
 
 # =========================
-# LOAD DATA (SAFE)
+# LOAD DATA SAFE
 # =========================
 def load_data():
     db = {}
@@ -65,7 +62,7 @@ def save_data(db):
     st.session_state.db = load_data()
 
 # =========================
-# GRADE SYSTEM
+# GRADE
 # =========================
 def get_grade(m):
     if m >= 90: return "A+"
@@ -107,7 +104,7 @@ if not st.session_state.logged_in:
         p = str(p).strip()
         r = str(r).strip()
 
-        # ADMIN LOGIN
+        # Admin login
         if u == "admin" and p == "admin123":
             st.session_state.logged_in = True
             st.session_state.role = "Admin"
@@ -163,7 +160,7 @@ else:
         df = db["students"]
         st.dataframe(df)
 
-        sid = st.text_input("ID")
+        sid = st.text_input("Student ID")
         name = st.text_input("Name")
         course = st.text_input("Course")
 
@@ -175,10 +172,10 @@ else:
             st.success("Added")
             st.rerun()
 
-        del_id = st.text_input("Delete ID")
+        did = st.text_input("Delete ID")
 
         if st.button("Delete"):
-            db["students"] = df[df["student_id"] != del_id]
+            db["students"] = df[df["student_id"] != did]
             save_data(db)
             st.success("Deleted")
             st.rerun()
@@ -194,7 +191,7 @@ else:
         else:
             st.warning("No data")
 
-    # ================= MARKS =================
+    # ================= MARKS ENTRY =================
     elif choice == "Marks Entry":
         st.title("Marks Entry")
 
@@ -229,19 +226,24 @@ else:
             st.success("Saved")
             st.rerun()
 
-    # ================= RESULTS =================
+    # ================= RESULTS (FIXED) =================
     elif choice == "My Results":
         st.title("My Results")
 
-        df = db["results"]
+        df = db["results"].copy()
 
-        # 🔥 FINAL FIX (IMPORTANT)
-        df["student_id"] = df["student_id"].astype(str).str.strip().str.replace(".0","")
-        sid = str(st.session_state.link_id).strip()
+        # 🔥 CLEAN DATA (IMPORTANT FIX)
+        df["student_id"] = df["student_id"].astype(str).str.strip().str.replace(".0","",regex=False)
 
-        df = df[df["student_id"] == sid]
+        sid = str(st.session_state.link_id).strip().replace(".0","")
 
-        st.dataframe(df)
+        result_df = df[df["student_id"] == sid]
+
+        if result_df.empty:
+            st.warning("No results found for your ID")
+        else:
+            st.success("Your Results")
+            st.dataframe(result_df)
 
     # ================= LOGOUT =================
     elif choice == "Logout":
