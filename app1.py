@@ -3,9 +3,6 @@ import pandas as pd
 import os
 from datetime import datetime
 import plotly.express as px
-from io import BytesIO
-from reportlab.pdfgen import canvas
-import qrcode
 
 # =========================
 # CONFIG
@@ -65,61 +62,7 @@ def save_data(db):
     st.session_state.db = load_data()
 
 # =========================
-# GRADE SYSTEM
-# =========================
-def get_grade(m):
-    if m >= 90: return "A+"
-    elif m >= 75: return "A"
-    elif m >= 60: return "B"
-    elif m >= 40: return "C"
-    return "F"
-
-# =========================
-# REPORT CARD + QR
-# =========================
-def generate_report_card(student_id, df):
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer)
-
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(180, 800, "CAMPUS ERP - REPORT CARD")
-
-    c.setFont("Helvetica", 12)
-    c.drawString(100, 770, f"Student ID: {student_id}")
-    c.drawString(100, 750, f"Date: {datetime.now().date()}")
-
-    y = 700
-    total = 0
-    count = 0
-
-    for _, row in df.iterrows():
-        line = f"{row['subject']} : {row['marks']} ({row['grade']})"
-        c.drawString(100, y, line)
-        y -= 20
-
-        total += float(row["marks"])
-        count += 1
-
-    avg = total / count if count > 0 else 0
-    c.drawString(100, y-20, f"Average: {avg:.2f}")
-
-    # ================= QR CODE =================
-    qr_text = f"Student:{student_id}|Avg:{avg:.2f}|Verified:CampusERP"
-    qr = qrcode.make(qr_text)
-
-    qr_buffer = BytesIO()
-    qr.save(qr_buffer)
-    qr_buffer.seek(0)
-
-    c.drawImage(qr_buffer, 400, 650, width=120, height=120)
-
-    c.save()
-    buffer.seek(0)
-
-    return buffer
-
-# =========================
-# SESSION
+# SESSION INIT
 # =========================
 if "db" not in st.session_state:
     st.session_state.db = load_data()
@@ -149,6 +92,7 @@ if not st.session_state.logged_in:
         u = str(u).strip()
         p = str(p).strip()
 
+        # ADMIN LOGIN
         if u == "admin" and p == "admin123":
             st.session_state.logged_in = True
             st.session_state.role = "Admin"
@@ -197,14 +141,14 @@ else:
 
     # ================= STUDENTS =================
     elif choice == "Students":
-        st.title("Students")
+        st.title("Students List")
         st.dataframe(db["students"])
 
     # ================= ANALYTICS =================
     elif choice == "Analytics":
         st.title("Analytics")
-        res = db["results"]
 
+        res = db["results"]
         if not res.empty:
             st.plotly_chart(px.histogram(res, x="marks"))
         else:
@@ -218,11 +162,12 @@ else:
         sub = st.text_input("Subject")
         m = st.number_input("Marks",0,100)
 
-        g = get_grade(m)
-
         if st.button("Save"):
-            new = pd.DataFrame([[sid,sub,m,g]],
+            grade = "A+" if m>=90 else "A" if m>=75 else "B" if m>=60 else "C" if m>=40 else "F"
+
+            new = pd.DataFrame([[sid,sub,m,grade]],
                                columns=SCHEMA["results"])
+
             db["results"] = pd.concat([db["results"],new], ignore_index=True)
             save_data(db)
             st.success("Saved")
@@ -239,38 +184,57 @@ else:
         if st.button("Save"):
             new = pd.DataFrame([[sid,cid,str(datetime.today().date()),status]],
                                columns=SCHEMA["attendance"])
+
             db["attendance"] = pd.concat([db["attendance"],new], ignore_index=True)
             save_data(db)
             st.success("Saved")
             st.rerun()
 
-    # ================= RESULTS + CERTIFICATE =================
+    # ================= REPORT CARD =================
     elif choice == "My Results":
-        st.title("My Report Card")
+        st.title("🎓 Student Report Card")
 
         df = db["results"].copy()
 
+        # CLEAN DATA (IMPORTANT FIX)
         df["student_id"] = df["student_id"].astype(str).str.strip().str.replace(".0","",regex=False)
+
         sid = str(st.session_state.link_id).strip()
 
-        result_df = df[df["student_id"] == sid]
+        student_df = df[df["student_id"] == sid]
 
-        if result_df.empty:
-            st.warning("No results found")
+        # ================= NO RESULT =================
+        if student_df.empty:
+            st.error("❌ No result found for your Student ID")
+            st.info("Contact faculty to add marks")
         else:
-            st.success("Your Results")
-            st.dataframe(result_df)
+            st.success("🎉 Report Card Loaded")
 
-            # ================= DOWNLOAD CERTIFICATE =================
-            if st.button("Download Report Card (PDF)"):
-                pdf = generate_report_card(sid, result_df)
+            st.markdown(f"""
+            ### 🏫 Campus ERP Report Card  
+            **Student ID:** {sid}  
+            **Date:** {datetime.today().date()}  
+            ---  
+            """)
 
-                st.download_button(
-                    "Download Certificate",
-                    pdf,
-                    file_name=f"report_card_{sid}.pdf",
-                    mime="application/pdf"
-                )
+            st.table(student_df)
+
+            total = student_df["marks"].sum()
+            avg = student_df["marks"].mean()
+
+            col1, col2 = st.columns(2)
+
+            col1.metric("📊 Total Marks", int(total))
+            col2.metric("📈 Average", round(avg,2))
+
+            if avg >= 75:
+                st.success("Excellent Performance ⭐")
+            elif avg >= 60:
+                st.info("Good Performance 👍")
+            elif avg >= 40:
+                st.warning("Average Performance ⚠️")
+            else:
+                st.error("Needs Improvement ❌")
 
     # ================= LOGOUT =================
     elif choice == "Logout":
