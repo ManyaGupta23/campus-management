@@ -3,6 +3,9 @@ import pandas as pd
 import os
 from datetime import datetime
 import plotly.express as px
+from io import BytesIO
+from reportlab.pdfgen import canvas
+import qrcode
 
 # =========================
 # CONFIG
@@ -25,7 +28,7 @@ SCHEMA = {
 }
 
 # =========================
-# CREATE FILE IF NOT EXISTS
+# CREATE FILE
 # =========================
 def create_file():
     with pd.ExcelWriter(FILE_NAME, engine="openpyxl") as writer:
@@ -62,7 +65,7 @@ def save_data(db):
     st.session_state.db = load_data()
 
 # =========================
-# GRADE
+# GRADE SYSTEM
 # =========================
 def get_grade(m):
     if m >= 90: return "A+"
@@ -72,7 +75,51 @@ def get_grade(m):
     return "F"
 
 # =========================
-# SESSION INIT
+# REPORT CARD + QR
+# =========================
+def generate_report_card(student_id, df):
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer)
+
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(180, 800, "CAMPUS ERP - REPORT CARD")
+
+    c.setFont("Helvetica", 12)
+    c.drawString(100, 770, f"Student ID: {student_id}")
+    c.drawString(100, 750, f"Date: {datetime.now().date()}")
+
+    y = 700
+    total = 0
+    count = 0
+
+    for _, row in df.iterrows():
+        line = f"{row['subject']} : {row['marks']} ({row['grade']})"
+        c.drawString(100, y, line)
+        y -= 20
+
+        total += float(row["marks"])
+        count += 1
+
+    avg = total / count if count > 0 else 0
+    c.drawString(100, y-20, f"Average: {avg:.2f}")
+
+    # ================= QR CODE =================
+    qr_text = f"Student:{student_id}|Avg:{avg:.2f}|Verified:CampusERP"
+    qr = qrcode.make(qr_text)
+
+    qr_buffer = BytesIO()
+    qr.save(qr_buffer)
+    qr_buffer.seek(0)
+
+    c.drawImage(qr_buffer, 400, 650, width=120, height=120)
+
+    c.save()
+    buffer.seek(0)
+
+    return buffer
+
+# =========================
+# SESSION
 # =========================
 if "db" not in st.session_state:
     st.session_state.db = load_data()
@@ -80,7 +127,6 @@ if "db" not in st.session_state:
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
     st.session_state.role = None
-    st.session_state.user = None
     st.session_state.link_id = None
 
 # =========================
@@ -102,9 +148,7 @@ if not st.session_state.logged_in:
 
         u = str(u).strip()
         p = str(p).strip()
-        r = str(r).strip()
 
-        # Admin login
         if u == "admin" and p == "admin123":
             st.session_state.logged_in = True
             st.session_state.role = "Admin"
@@ -120,12 +164,9 @@ if not st.session_state.logged_in:
             if not match.empty:
                 st.session_state.logged_in = True
                 st.session_state.role = r
-                st.session_state.user = u
 
                 if r.lower() == "student":
-                    st.session_state.link_id = str(match.iloc[0]["student_id"]).strip()
-                elif r.lower() == "faculty":
-                    st.session_state.link_id = str(match.iloc[0]["faculty_id"]).strip()
+                    st.session_state.link_id = str(match.iloc[0]["student_id"])
 
                 st.rerun()
             else:
@@ -135,18 +176,18 @@ if not st.session_state.logged_in:
 # MAIN APP
 # =========================
 else:
+    db = st.session_state.db
+
     st.sidebar.title(f"Role: {st.session_state.role}")
 
     if st.session_state.role == "Admin":
         menu = ["Dashboard","Students","Analytics","Logout"]
     elif st.session_state.role == "Faculty":
-        menu = ["Attendance","Marks Entry","Logout"]
+        menu = ["Marks Entry","Attendance","Logout"]
     else:
         menu = ["My Results","Logout"]
 
     choice = st.sidebar.radio("Menu", menu)
-
-    db = st.session_state.db
 
     # ================= ADMIN =================
     if choice == "Dashboard":
@@ -157,33 +198,11 @@ else:
     # ================= STUDENTS =================
     elif choice == "Students":
         st.title("Students")
-        df = db["students"]
-        st.dataframe(df)
-
-        sid = st.text_input("Student ID")
-        name = st.text_input("Name")
-        course = st.text_input("Course")
-
-        if st.button("Add"):
-            new = pd.DataFrame([[sid,name,None,course,None,None,str(datetime.today().date()),0,"Active",None]],
-                               columns=SCHEMA["students"])
-            db["students"] = pd.concat([df,new], ignore_index=True)
-            save_data(db)
-            st.success("Added")
-            st.rerun()
-
-        did = st.text_input("Delete ID")
-
-        if st.button("Delete"):
-            db["students"] = df[df["student_id"] != did]
-            save_data(db)
-            st.success("Deleted")
-            st.rerun()
+        st.dataframe(db["students"])
 
     # ================= ANALYTICS =================
     elif choice == "Analytics":
         st.title("Analytics")
-
         res = db["results"]
 
         if not res.empty:
@@ -191,7 +210,7 @@ else:
         else:
             st.warning("No data")
 
-    # ================= MARKS ENTRY =================
+    # ================= MARKS =================
     elif choice == "Marks Entry":
         st.title("Marks Entry")
 
@@ -200,7 +219,6 @@ else:
         m = st.number_input("Marks",0,100)
 
         g = get_grade(m)
-        st.info(f"Grade: {g}")
 
         if st.button("Save"):
             new = pd.DataFrame([[sid,sub,m,g]],
@@ -226,24 +244,33 @@ else:
             st.success("Saved")
             st.rerun()
 
-    # ================= RESULTS (FIXED) =================
+    # ================= RESULTS + CERTIFICATE =================
     elif choice == "My Results":
-        st.title("My Results")
+        st.title("My Report Card")
 
         df = db["results"].copy()
 
-        # 🔥 CLEAN DATA (IMPORTANT FIX)
         df["student_id"] = df["student_id"].astype(str).str.strip().str.replace(".0","",regex=False)
-
-        sid = str(st.session_state.link_id).strip().replace(".0","")
+        sid = str(st.session_state.link_id).strip()
 
         result_df = df[df["student_id"] == sid]
 
         if result_df.empty:
-            st.warning("No results found for your ID")
+            st.warning("No results found")
         else:
             st.success("Your Results")
             st.dataframe(result_df)
+
+            # ================= DOWNLOAD CERTIFICATE =================
+            if st.button("Download Report Card (PDF)"):
+                pdf = generate_report_card(sid, result_df)
+
+                st.download_button(
+                    "Download Certificate",
+                    pdf,
+                    file_name=f"report_card_{sid}.pdf",
+                    mime="application/pdf"
+                )
 
     # ================= LOGOUT =================
     elif choice == "Logout":
