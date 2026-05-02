@@ -1,6 +1,6 @@
 # =========================================
-# CAMPUS FLOW ERP SYSTEM (FIXED VERSION)
-# Streamlit + Pandas + Excel + QR + PDF
+# CAMPUS FLOW ERP SYSTEM (EXCEL FIXED VERSION)
+# Streamlit + Pandas + Excel (Stable Version)
 # =========================================
 
 import streamlit as st
@@ -40,7 +40,7 @@ SCHEMA = {
 }
 
 # =========================
-# LOAD DATA
+# LOAD DATA (FIXED)
 # =========================
 def load_data():
     db = {}
@@ -51,20 +51,20 @@ def load_data():
                 pd.DataFrame(columns=cols).to_excel(writer, sheet_name=sheet, index=False)
 
     for sheet in SHEETS:
-        try:
-            db[sheet] = pd.read_excel(FILE_NAME, sheet_name=sheet)
-        except:
-            db[sheet] = pd.DataFrame(columns=SCHEMA.get(sheet, []))
+        db[sheet] = pd.read_excel(FILE_NAME, sheet_name=sheet)
 
     return db
 
 # =========================
-# SAVE DATA
+# SAVE DATA (FIXED)
 # =========================
 def save_data(db):
     with pd.ExcelWriter(FILE_NAME, engine="openpyxl", mode="w") as writer:
         for sheet, df in db.items():
             df.to_excel(writer, sheet_name=sheet, index=False)
+
+    # 🔥 IMPORTANT: reload after saving
+    st.session_state.db = load_data()
 
 # =========================
 # GRADE SYSTEM
@@ -93,7 +93,7 @@ if "logged_in" not in st.session_state:
     st.session_state.link_id = None
 
 # =========================
-# LOGIN PAGE
+# LOGIN SYSTEM
 # =========================
 if not st.session_state.logged_in:
     st.title("🏫 Campus Flow ERP Login")
@@ -125,14 +125,13 @@ if not st.session_state.logged_in:
                 st.session_state.link_id = str(match.iloc[0]["student_id"])
             elif role == "Faculty":
                 st.session_state.link_id = str(match.iloc[0]["faculty_id"])
-
         else:
             st.error("Invalid Login")
 
         st.rerun()
 
 # =========================
-# DASHBOARD
+# MAIN DASHBOARD
 # =========================
 else:
     st.sidebar.title(f"Role: {st.session_state.role}")
@@ -148,8 +147,7 @@ else:
 
     db = st.session_state.db
 
-    # ================= ADMIN =================
-
+    # ================= ADMIN DASHBOARD =================
     if choice == "Dashboard":
         st.title("📊 Admin Dashboard")
 
@@ -158,7 +156,6 @@ else:
         st.metric("Classes", len(db["schedule"]))
 
     # ================= STUDENTS =================
-
     elif choice == "Students":
         st.title("👨‍🎓 Students")
 
@@ -173,26 +170,37 @@ else:
 
         if st.button("Add Student"):
             new = pd.DataFrame([[sid,name,None,course,None,None,str(datetime.today().date()),0,"Active",None]],
-            columns=SCHEMA["students"])
+                               columns=SCHEMA["students"])
 
             db["students"] = pd.concat([df,new], ignore_index=True)
             save_data(db)
-            st.success("Added")
+
+            st.success("Student Added")
+            st.rerun()
+
+        st.subheader("Delete Student")
+
+        del_id = st.text_input("Student ID to delete")
+
+        if st.button("Delete Student"):
+            df = df[df["student_id"] != del_id]
+            db["students"] = df
+            save_data(db)
+
+            st.success("Deleted")
+            st.rerun()
 
     # ================= FACULTY =================
-
     elif choice == "Faculty":
         st.title("👨‍🏫 Faculty")
         st.dataframe(db["faculty"])
 
     # ================= SCHEDULE =================
-
     elif choice == "Schedule":
         st.title("📅 Schedule")
         st.dataframe(db["schedule"])
 
     # ================= CONFLICT =================
-
     elif choice == "Conflict":
         st.title("⚠️ Conflict Detection")
 
@@ -202,10 +210,9 @@ else:
             dup = sch[sch.duplicated(subset=["room_id","time_slot"], keep=False)]
             st.dataframe(dup)
         else:
-            st.warning("No data")
+            st.warning("No schedule data")
 
     # ================= ANALYTICS =================
-
     elif choice == "Analytics":
         st.title("📈 Analytics")
 
@@ -214,12 +221,11 @@ else:
         if not res.empty and "marks" in res.columns:
             st.plotly_chart(px.histogram(res, x="marks"))
         else:
-            st.warning("No results data")
+            st.warning("No data")
 
-    # ================= FACULTY MARKS =================
-
+    # ================= MARKS ENTRY =================
     elif choice == "Marks Entry":
-        st.title("📝 Enter Marks")
+        st.title("📝 Marks Entry")
 
         sid = st.text_input("Student ID")
         subject = st.text_input("Subject")
@@ -230,14 +236,15 @@ else:
 
         if st.button("Save Marks"):
             new = pd.DataFrame([[sid,subject,marks,grade]],
-            columns=SCHEMA["results"])
+                               columns=SCHEMA["results"])
 
             db["results"] = pd.concat([db["results"],new], ignore_index=True)
             save_data(db)
+
             st.success("Saved")
+            st.rerun()
 
     # ================= ATTENDANCE =================
-
     elif choice == "Attendance":
         st.title("📌 Attendance")
 
@@ -247,14 +254,15 @@ else:
 
         if st.button("Save Attendance"):
             new = pd.DataFrame([[sid,cid,str(datetime.today().date()),status]],
-            columns=SCHEMA["attendance"])
+                               columns=SCHEMA["attendance"])
 
             db["attendance"] = pd.concat([db["attendance"],new], ignore_index=True)
             save_data(db)
+
             st.success("Saved")
+            st.rerun()
 
     # ================= STUDENT RESULTS =================
-
     elif choice == "My Results":
         st.title("🎓 My Results")
 
@@ -272,7 +280,7 @@ else:
             qr.save(buf)
             st.image(buf.getvalue())
 
-        # PDF DOWNLOAD
+        # PDF
         if st.button("Download PDF"):
             buffer = BytesIO()
             c = canvas.Canvas(buffer)
@@ -287,10 +295,9 @@ else:
             c.save()
             buffer.seek(0)
 
-            st.download_button("Download PDF", buffer, file_name="result.pdf")
+            st.download_button("Download", buffer, file_name="result.pdf")
 
     # ================= LOGOUT =================
-
     elif choice == "Logout":
         st.session_state.logged_in = False
         st.rerun()
