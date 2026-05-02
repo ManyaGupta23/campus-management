@@ -1,168 +1,162 @@
 import streamlit as st
 import pandas as pd
 import os
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet
+from datetime import datetime
 
 # =========================
-# CONFIG & FILE HANDLING
+# CONFIG
 # =========================
-st.set_page_config(page_title="Student ERP System", layout="wide", page_icon="🎓")
+st.set_page_config(page_title="Campus Flow ERP", layout="wide", page_icon="🏫")
 
-FILE_NAME = "student_performance.xlsx"
+# Your exact Excel filename
+FILE_NAME = "campus_flow_template.xlsx"
 
-def load_data():
-    """Initializes the Excel file if missing and loads data."""
+# =========================
+# DATA ENGINE
+# =========================
+def load_all_data():
+    """Reads all sheets from the Excel file."""
     if not os.path.exists(FILE_NAME):
-        df_students = pd.DataFrame(columns=["ID", "Name", "Course", "Marks"])
-        df_users = pd.DataFrame([["admin", "admin123"]], columns=["username", "password"])
-        save_data(df_students, df_users)
+        st.error(f"File '{FILE_NAME}' not found! Please ensure it is in your GitHub folder.")
+        st.stop()
     
-    df_students = pd.read_excel(FILE_NAME, sheet_name="students")
-    df_users = pd.read_excel(FILE_NAME, sheet_name="users")
-    return df_students, df_users
+    # Mapping to your specific sheet names
+    db = {
+        "students": pd.read_excel(FILE_NAME, sheet_name="students"),
+        "faculty": pd.read_excel(FILE_NAME, sheet_name="faculty"),
+        "rooms": pd.read_excel(FILE_NAME, sheet_name="rooms"),
+        "schedule": pd.read_excel(FILE_NAME, sheet_name="schedule"),
+        "attendance": pd.read_excel(FILE_NAME, sheet_name="attendance"),
+        "logs": pd.read_excel(FILE_NAME, sheet_name="logs")
+    }
+    return db
 
-def save_data(df_students, df_users):
-    """Saves both sheets to the Excel file safely."""
+def save_all_data(db_dict):
+    """Writes all dataframes back to the Excel sheets."""
     with pd.ExcelWriter(FILE_NAME, engine="openpyxl") as writer:
-        df_students.to_excel(writer, sheet_name="students", index=False)
-        df_users.to_excel(writer, sheet_name="users", index=False)
+        for sheet_name, df in db_dict.items():
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-# Load data at startup
-df_students, df_users = load_data()
+# Initialize data in session state for speed
+if "db" not in st.session_state:
+    st.session_state.db = load_all_data()
 
-# =========================
-# PDF GENERATION
-# =========================
-def generate_pdf(dataframe):
-    file_path = "report.pdf"
-    doc = SimpleDocTemplate(file_path)
-    styles = getSampleStyleSheet()
-    elements = []
-
-    elements.append(Paragraph("Student Performance Report", styles["Title"]))
-    elements.append(Spacer(1, 12))
-
-    # Convert dataframe to list format for ReportLab Table
-    data = [dataframe.columns.tolist()] + dataframe.values.tolist()
-    table = Table(data)
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
-        ("GRID", (0, 0), (-1, -1), 1, colors.black)
-    ]))
-
-    elements.append(table)
-    doc.build(elements)
-    return file_path
-
-# =========================
-# AUTHENTICATION SESSION
-# =========================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+    st.session_state.role = None
+    st.session_state.user_id = None
 
 # =========================
-# LOGIN PAGE
+# LOGIN SYSTEM
 # =========================
 if not st.session_state.logged_in:
-    st.title("🎓 Student ERP System")
-    with st.container():
-        st.subheader("Login to Access Dashboard")
-        user_input = st.text_input("Username")
-        pass_input = st.text_input("Password", type="password")
+    st.title("🏫 Campus Flow Management Login")
+    
+    with st.form("login_form"):
+        user_id_input = st.text_input("Enter ID (Faculty ID or Student ID)")
+        # For this template, any valid ID in the sheets acts as the login
+        submit = st.form_submit_button("Login")
         
-        if st.button("Login"):
-            # Check credentials
-            auth_success = not df_users[(df_users["username"] == user_input) & 
-                                       (df_users["password"] == pass_input)].empty
-            if auth_success:
+        if submit:
+            # Validate against sheets
+            fac_match = st.session_state.db["faculty"][st.session_state.db["faculty"]["faculty_id"].astype(str) == user_id_input]
+            stud_match = st.session_state.db["students"][st.session_state.db["students"]["student_id"].astype(str) == user_id_input]
+            
+            if user_id_input == "admin":
                 st.session_state.logged_in = True
+                st.session_state.role = "Admin"
+                st.rerun()
+            elif not fac_match.empty:
+                st.session_state.logged_in = True
+                st.session_state.role = "Faculty"
+                st.session_state.user_id = user_id_input
+                st.rerun()
+            elif not stud_match.empty:
+                st.session_state.logged_in = True
+                st.session_state.role = "Student"
+                st.session_state.user_id = user_id_input
                 st.rerun()
             else:
-                st.error("Invalid Username or Password")
+                st.error("User ID not found in database.")
 
 # =========================
-# DASHBOARD (LOGGED IN)
+# MAIN DASHBOARD
 # =========================
 else:
-    st.sidebar.title(f"Welcome, Admin")
-    menu = st.sidebar.selectbox(
-        "Navigation",
-        ["View Students", "Add Student", "Update Student", "Delete Student", "Reports", "Logout"]
-    )
+    st.sidebar.title(f"Portal: {st.session_state.role}")
+    st.sidebar.write(f"Logged in as: **{st.session_state.user_id if st.session_state.user_id else 'Admin'}**")
+    
+    # Navigation logic
+    if st.session_state.role in ["Admin", "Faculty"]:
+        menu = st.sidebar.radio("Navigation", 
+            ["Student Directory", "Add/Update Student", "Attendance Records", "Faculty List", "Schedule & Rooms", "System Logs", "Logout"])
+    else:
+        menu = st.sidebar.radio("Navigation", ["My Profile", "My Attendance", "Class Schedule", "Logout"])
 
-    if menu == "View Students":
-        st.header("📋 All Student Records")
-        st.dataframe(df_students, use_container_width=True)
+    # 1. STUDENT DIRECTORY (Admin/Faculty)
+    if menu == "Student Directory":
+        st.header("📋 Student Master Records")
+        st.dataframe(st.session_state.db["students"], use_container_width=True)
 
-    elif menu == "Add Student":
-        st.header("➕ Add New Student")
-        with st.form("add_form", clear_on_submit=True):
-            sid = st.number_input("Student ID", step=1, min_value=1)
-            name = st.text_input("Full Name")
-            course = st.text_input("Course Name")
-            marks = st.number_input("Marks", min_value=0, max_value=100)
+    # 2. ADD / UPDATE STUDENT (Admin/Faculty)
+    elif menu == "Add/Update Student":
+        st.header("📝 Register or Update Student")
+        with st.form("student_form"):
+            c1, c2 = st.columns(2)
+            with c1:
+                s_id = st.text_input("Student ID (Unique)")
+                s_name = st.text_input("Full Name")
+                s_gender = st.selectbox("Gender", ["M", "F", "Other"])
+                s_course = st.text_input("Course")
+            with c2:
+                s_year = st.number_input("Current Year", min_value=1, step=1)
+                s_section = st.text_input("Section")
+                s_email = st.text_input("Email Address")
+                s_date = st.date_input("Admission Date", value=datetime.now())
             
-            if st.form_submit_button("Submit"):
-                if sid in df_students["ID"].values:
-                    st.error("Student ID already exists!")
-                else:
-                    new_student = pd.DataFrame([[sid, name, course, marks]], columns=df_students.columns)
-                    df_students = pd.concat([df_students, new_student], ignore_index=True)
-                    save_data(df_students, df_users)
-                    st.success("Student added successfully!")
-
-    elif menu == "Update Student":
-        st.header("✏️ Edit Student Information")
-        search_id = st.number_input("Enter ID to Search", step=1, min_value=1)
-        
-        # Check if student exists
-        student_row = df_students[df_students["ID"] == search_id]
-        
-        if not student_row.empty:
-            idx = student_row.index[0]
-            with st.form("update_form"):
-                u_name = st.text_input("Name", value=df_students.at[idx, "Name"])
-                u_course = st.text_input("Course", value=df_students.at[idx, "Course"])
-                u_marks = st.number_input("Marks", value=int(df_students.at[idx, "Marks"]))
+            if st.form_submit_button("Save Changes"):
+                new_student = {
+                    "student_id": s_id, "name": s_name, "gender": s_gender, 
+                    "course": s_course, "year": s_year, "section": s_section, 
+                    "admission_date": str(s_date), "email": s_email,
+                    "attendance_percentage": 0, "status": "Active"
+                }
                 
-                if st.form_submit_button("Update Records"):
-                    df_students.at[idx, "Name"] = u_name
-                    df_students.at[idx, "Course"] = u_course
-                    df_students.at[idx, "Marks"] = u_marks
-                    save_data(df_students, df_users)
-                    st.success("Record updated successfully!")
+                df = st.session_state.db["students"]
+                # If ID exists, update; else, append
+                if s_id in df["student_id"].astype(str).values:
+                    df.loc[df["student_id"].astype(str) == s_id, list(new_student.keys())] = list(new_student.values())
+                    st.success(f"Updated record for {s_name}")
+                else:
+                    st.session_state.db["students"] = pd.concat([df, pd.DataFrame([new_student])], ignore_index=True)
+                    st.success(f"Added new student: {s_name}")
+                
+                save_all_data(st.session_state.db)
+
+    # 3. SCHEDULE & ROOMS
+    elif menu == "Schedule & Rooms":
+        st.header("🏢 Campus Logistics")
+        tab1, tab2 = st.tabs(["Class Schedule", "Room Capacity"])
+        with tab1:
+            st.dataframe(st.session_state.db["schedule"], use_container_width=True)
+        with tab2:
+            st.dataframe(st.session_state.db["rooms"], use_container_width=True)
+
+    # 4. STUDENT VIEW (Self)
+    elif menu == "My Profile":
+        st.header("👤 Personal Profile")
+        profile = st.session_state.db["students"][st.session_state.db["students"]["student_id"].astype(str) == st.session_state.user_id]
+        if not profile.empty:
+            st.table(profile.T) # Transposed for better readability
         else:
-            st.info("Search for a valid Student ID to reveal the update form.")
+            st.error("Profile not found.")
 
-    elif menu == "Delete Student":
-        st.header("❌ Remove Student")
-        del_id = st.number_input("Enter ID to Delete", step=1, min_value=1)
-        if st.button("Delete Permanently"):
-            if del_id in df_students["ID"].values:
-                df_students = df_students[df_students["ID"] != del_id]
-                save_data(df_students, df_users)
-                st.success(f"Student ID {del_id} deleted.")
-            else:
-                st.error("ID not found.")
+    elif menu == "My Attendance":
+        st.header("📅 My Attendance History")
+        attn = st.session_state.db["attendance"][st.session_state.db["attendance"]["student_id"].astype(str) == st.session_state.user_id]
+        st.dataframe(attn, use_container_width=True)
 
-    elif menu == "Reports":
-        st.header("📊 Performance Analytics")
-        if not df_students.empty:
-            st.bar_chart(df_students.set_index("Name")["Marks"])
-            
-            if st.button("Export to PDF"):
-                pdf_path = generate_pdf(df_students)
-                with open(pdf_path, "rb") as f:
-                    st.download_button("Download PDF Report", f, file_name="Student_Report.pdf")
-        else:
-            st.warning("No data available to generate reports.")
-
+    # 5. LOGOUT
     elif menu == "Logout":
         st.session_state.logged_in = False
         st.rerun()
