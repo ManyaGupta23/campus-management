@@ -252,7 +252,7 @@ else:
     # ===== FACULTY =====
     elif role=="Faculty":
        faculty_id = str(st.session_state.link)
-        if ch == "My Schedule":
+    if ch == "My Schedule":
           st.subheader("📅 My Schedule")
           df = db["schedule"].copy()
         df["faculty_id"] = df["faculty_id"].astype(str)
