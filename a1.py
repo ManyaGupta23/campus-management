@@ -2,10 +2,14 @@
 import streamlit as st
 import pandas as pd
 import os
+from datetime import datetime
+import qrcode
+
+# PDF
 from reportlab.platypus import *
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.units import inch
 
@@ -14,84 +18,158 @@ st.set_page_config(page_title="Campus ERP", layout="wide")
 
 FILE = "campus_flow_template.xlsx"
 
-# ================= CLEAN =================
+SCHEMA = {
+    "students": ["student_id","name","course","email"],
+    "faculty": ["faculty_id","name","subject"],
+    "rooms": ["room_id","capacity"],
+    "schedule": ["class_id","faculty_id","room_id","time_slot","subject"],
+    "attendance": ["student_id","class_id","date","status"],
+    "users": ["username","password","role","student_id","faculty_id"],
+    "results": ["student_id","subject","marks","grade"]
+}
+
+# ================= UTIL =================
 def clean(x):
     return str(x).strip().replace(".0","")
 
-# ================= LOAD =================
+# ================= FILE =================
 def load():
     if not os.path.exists(FILE):
-        pd.DataFrame(columns=["username","password","role","student_id","faculty_id"])\
-        .to_excel(FILE, sheet_name="users", index=False)
+        with pd.ExcelWriter(FILE, engine="openpyxl") as w:
+            for s, cols in SCHEMA.items():
+                pd.DataFrame(columns=cols).to_excel(w, sheet_name=s, index=False)
 
-    df = pd.read_excel(FILE, sheet_name="users")
+    db = {}
+    xls = pd.ExcelFile(FILE)
 
-    df = df.astype(str)
-    for col in df.columns:
-        df[col] = df[col].apply(clean)
+    for s in SCHEMA:
+        if s in xls.sheet_names:
+            df = pd.read_excel(FILE, sheet_name=s)
+        else:
+            df = pd.DataFrame(columns=SCHEMA[s])
 
-    return {"users": df}
+        df = df.astype(str)
+        for col in df.columns:
+            df[col] = df[col].apply(clean)
 
-# ================= LOGIN UI =================
-def set_bg():
-    st.markdown("""
-    <style>
-    .stApp {
-        background-image: url("campus.jpg");
-        background-size: cover;
-    }
+        db[s] = df
 
-    .box {
-        background: rgba(255,255,255,0.9);
-        padding: 30px;
-        border-radius: 15px;
-        width: 350px;
-        margin: auto;
-        margin-top: 120px;
-        box-shadow: 0px 0px 20px rgba(0,0,0,0.3);
-    }
+    return db
 
-    .title {
-        text-align: center;
-        font-size: 28px;
-        color: #C9A227;
-        font-weight: bold;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+def save(db):
+    with pd.ExcelWriter(FILE, engine="openpyxl", mode="w") as w:
+        for s, df in db.items():
+            df.to_excel(w, sheet_name=s, index=False)
+    st.session_state.db = load()
 
-# ================= PDF (PREMIUM REPORT) =================
-def report_pdf(sid, df):
-    file = f"{sid}_report.pdf"
-    doc = SimpleDocTemplate(file, pagesize=A4)
+# ================= GRADE =================
+def grade(m):
+    m = int(m)
+    return "A+" if m>=90 else "A" if m>=75 else "B" if m>=60 else "C" if m>=40 else "F"
 
-    content = []
+# ================= QR =================
+def generate_qr(data, file):
+    img = qrcode.make(data)
+    img.save(file)
+    return file
 
-    title = ParagraphStyle(name="t", fontSize=24, alignment=TA_CENTER, textColor=colors.HexColor("#C9A227"))
+# ================= PDF REPORT =================
+def report_pdf(sid,name,course,df):
+    file=f"{sid}_report.pdf"
+    doc=SimpleDocTemplate(file,pagesize=A4)
+    styles=getSampleStyleSheet()
+    content=[]
 
-    content.append(Paragraph("ACADEMIC REPORT CARD", title))
+    qr=generate_qr(f"{name}-{sid}-{course}",f"{sid}_qr.png")
+
+    if os.path.exists("logo.png"):
+        content.append(Image("logo.png",1.2*inch,1.2*inch,hAlign='CENTER'))
+
+    title=ParagraphStyle(name="t",fontSize=24,alignment=TA_CENTER,textColor=colors.HexColor("#C9A227"))
+    content.append(Paragraph("ACADEMIC REPORT CARD",title))
     content.append(Spacer(1,20))
 
-    data = [["Subject","Marks","Grade"]]
-    for _,r in df.iterrows():
-        data.append([r["subject"], r["marks"], r["grade"]])
+    content.append(Paragraph(f"Name: {name}",styles["Normal"]))
+    content.append(Paragraph(f"Student ID: {sid}",styles["Normal"]))
+    content.append(Paragraph(f"Course: {course}",styles["Normal"]))
 
-    t = Table(data)
+    data=[["Subject","Marks","Grade"]]
+    for _,r in df.iterrows():
+        data.append([r["subject"],r["marks"],r["grade"]])
+
+    t=Table(data)
     t.setStyle(TableStyle([
         ("BACKGROUND",(0,0),(-1,0),colors.HexColor("#C9A227")),
         ("TEXTCOLOR",(0,0),(-1,0),colors.white),
         ("GRID",(0,0),(-1,-1),1,colors.black)
     ]))
-
     content.append(t)
+
+    avg=df["marks"].astype(int).mean()
+    content.append(Paragraph(f"Average: {round(avg,2)}",styles["Normal"]))
+
+    content.append(Spacer(1,20))
+    content.append(Image(qr,1.5*inch,1.5*inch))
+
+    if os.path.exists("signature.png"):
+        content.append(Spacer(1,20))
+        content.append(Image("signature.png",2*inch,1*inch))
 
     def border(c,d):
         c.setStrokeColor(colors.HexColor("#C9A227"))
         c.setLineWidth(4)
         c.rect(20,20,555,800)
 
-    doc.build(content, onFirstPage=border)
+    doc.build(content,onFirstPage=border)
     return file
+
+# ================= PDF CERTIFICATE =================
+def certificate_pdf(sid,name,course):
+    file=f"{sid}_certificate.pdf"
+    doc=SimpleDocTemplate(file,pagesize=A4)
+    styles=getSampleStyleSheet()
+    content=[]
+
+    qr=generate_qr(f"Certificate-{name}-{sid}",f"{sid}_certqr.png")
+
+    if os.path.exists("logo.png"):
+        content.append(Image("logo.png",1.5*inch,1.5*inch,hAlign='CENTER'))
+
+    title=ParagraphStyle(name="t",fontSize=28,alignment=TA_CENTER,textColor=colors.HexColor("#C9A227"))
+    content.append(Paragraph("CERTIFICATE OF COMPLETION",title))
+    content.append(Spacer(1,30))
+
+    content.append(Paragraph(f"This is to certify {name}",styles["Normal"]))
+    content.append(Paragraph(f"Student ID: {sid}",styles["Normal"]))
+    content.append(Paragraph(f"Completed course {course}",styles["Normal"]))
+
+    content.append(Spacer(1,20))
+    content.append(Image(qr,1.6*inch,1.6*inch))
+
+    if os.path.exists("signature.png"):
+        content.append(Spacer(1,30))
+        content.append(Image("signature.png",2*inch,1*inch))
+
+    def border(c,d):
+        c.setStrokeColor(colors.HexColor("#C9A227"))
+        c.setLineWidth(4)
+        c.rect(20,20,555,800)
+
+    doc.build(content,onFirstPage=border)
+    return file
+
+# ================= CONFLICT =================
+def conflicts(df):
+    res=set()
+    for i in range(len(df)):
+        for j in range(i+1,len(df)):
+            a,b=df.iloc[i],df.iloc[j]
+            if a["time_slot"]==b["time_slot"]:
+                if a["room_id"]==b["room_id"]:
+                    res.add("Room conflict")
+                if a["faculty_id"]==b["faculty_id"]:
+                    res.add("Faculty conflict")
+    return list(res)
 
 # ================= SESSION =================
 if "db" not in st.session_state:
@@ -100,79 +178,91 @@ if "db" not in st.session_state:
 if "login" not in st.session_state:
     st.session_state.login = False
 
-# ================= LOGIN =================
+# ================= LOGIN UI =================
 if not st.session_state.login:
 
-    set_bg()
+    col1,col2 = st.columns([1.2,1])
 
-    st.markdown('<div class="box">', unsafe_allow_html=True)
-    st.markdown('<p class="title">🏫 Campus ERP</p>', unsafe_allow_html=True)
+    with col1:
+        st.image("college.jpg",use_container_width=True)
 
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-    r = st.selectbox("Role", ["Admin","Faculty","Student"])
+    with col2:
+        st.markdown("## 🎓 Student Login")
 
-    if st.button("Login"):
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        r = st.selectbox("Role", ["Admin","Faculty","Student"])
 
-        users = st.session_state.db["users"]
+        if st.button("Login"):
+            users = st.session_state.db["users"]
 
-        # ADMIN
-        if u == "admin" and p == "admin123":
-            st.session_state.login = True
-            st.session_state.role = "Admin"
-            st.rerun()
+            u = clean(u)
+            p = clean(p)
 
-        # USER MATCH
-        match = users[
-            (users["username"] == clean(u)) &
-            (users["password"] == clean(p)) &
-            (users["role"].str.lower() == r.lower())
-        ]
+            if u=="admin" and p=="admin123":
+                st.session_state.login=True
+                st.session_state.role="Admin"
+                st.rerun()
 
-        if not match.empty:
-            st.session_state.login = True
-            st.session_state.role = r
+            m = users[(users.username==u)&(users.password==p)&(users.role==r)]
 
-            if r == "Student":
-                st.session_state.link = match.iloc[0]["student_id"]
+            if not m.empty:
+                st.session_state.login=True
+                st.session_state.role=r
+                st.session_state.link = m.iloc[0]["student_id"] if r=="Student" else m.iloc[0]["faculty_id"]
+                st.rerun()
             else:
-                st.session_state.link = match.iloc[0]["faculty_id"]
+                st.error("Invalid login")
 
-            st.rerun()
-        else:
-            st.error("❌ Invalid Username / Password")
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ================= AFTER LOGIN =================
+# ================= MAIN =================
 else:
-    st.success(f"Welcome {st.session_state.role} 🎉")
+    db = st.session_state.db
+    role = st.session_state.role
 
-    if st.session_state.role == "Student":
-        sid = st.session_state.link
+    st.sidebar.title(f"👤 {role}")
 
-        st.subheader("📄 My Results")
+    if role=="Admin":
+        menu=["Dashboard","Students","Faculty","Schedule","Logout"]
+    elif role=="Faculty":
+        menu=["My Schedule","Marks","Logout"]
+    else:
+        menu=["My Results","Certificate","Logout"]
 
-        # demo empty
-        df = pd.DataFrame({
-            "subject":["Math","Python","DBMS"],
-            "marks":[80,75,90],
-            "grade":["A","A","A+"]
-        })
+    ch = st.sidebar.radio("Menu", menu)
 
+    if ch=="Dashboard":
+        st.metric("Students",len(db["students"]))
+        st.metric("Faculty",len(db["faculty"]))
+        st.metric("Rooms",len(db["rooms"]))
+
+        c = conflicts(db["schedule"])
+        if c: st.error(c)
+
+    elif ch=="My Results":
+        sid=st.session_state.link
+        df=db["results"][db["results"]["student_id"]==sid]
         st.dataframe(df)
 
-        if st.button("Download Report Card"):
-            f = report_pdf(sid, df)
+        info=db["students"][db["students"]["student_id"]==sid]
+        name=info.iloc[0]["name"] if not info.empty else "Student"
+        course=info.iloc[0]["course"] if not info.empty else "Course"
 
+        if st.button("Download Report"):
+            f=report_pdf(sid,name,course,df)
             with open(f,"rb") as file:
-                st.download_button(
-                    "📄 Download PDF",
-                    data=file.read(),
-                    file_name=f"{sid}_report.pdf",
-                    mime="application/pdf"
-                )
+                st.download_button("Download Report",file.read(),file_name=f"{sid}_report.pdf",mime="application/pdf")
 
-    if st.button("Logout"):
+    elif ch=="Certificate":
+        sid=st.session_state.link
+        info=db["students"][db["students"]["student_id"]==sid]
+        name=info.iloc[0]["name"]
+        course=info.iloc[0]["course"]
+
+        if st.button("Download Certificate"):
+            f=certificate_pdf(sid,name,course)
+            with open(f,"rb") as file:
+                st.download_button("Download Certificate",file.read(),file_name=f"{sid}_certificate.pdf",mime="application/pdf")
+
+    elif ch=="Logout":
         st.session_state.clear()
         st.rerun()
