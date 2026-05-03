@@ -2,6 +2,10 @@
 import streamlit as st
 import pandas as pd
 import os
+from datetime import datetime
+from reportlab.platypus import *
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
 
 # ================= CONFIG =================
 st.set_page_config(page_title="Campus ERP", layout="wide")
@@ -9,293 +13,223 @@ st.set_page_config(page_title="Campus ERP", layout="wide")
 FILE = "campus_flow_template.xlsx"
 
 SCHEMA = {
-    "users": ["username","password","role","student_id","faculty_id"]
+    "students": ["student_id","name","course","email"],
+    "faculty": ["faculty_id","name","subject"],
+    "schedule": ["class_id","faculty_id","room_id","time_slot","subject"],
+    "users": ["username","password","role","student_id","faculty_id"],
+    "results": ["student_id","subject","marks","grade"]
 }
-
-# ================= UTIL =================
-def clean(x):
-    return str(x).strip().replace(".0","")
 
 # ================= FILE =================
 def load():
     if not os.path.exists(FILE):
         with pd.ExcelWriter(FILE, engine="openpyxl") as w:
-            pd.DataFrame(columns=SCHEMA["users"]).to_excel(w, sheet_name="users", index=False)
+            for s, cols in SCHEMA.items():
+                pd.DataFrame(columns=cols).to_excel(w, sheet_name=s, index=False)
 
-    xls = pd.ExcelFile(FILE)
+    db={}
+    xls=pd.ExcelFile(FILE)
 
-    if "users" in xls.sheet_names:
-        df = pd.read_excel(FILE, sheet_name="users")
-    else:
-        df = pd.DataFrame(columns=SCHEMA["users"])
+    for s in SCHEMA:
+        df=pd.read_excel(FILE, sheet_name=s) if s in xls.sheet_names else pd.DataFrame(columns=SCHEMA[s])
+        df=df.astype(str)
+        db[s]=df
 
-    # FIXED CLEANING (NO applymap)
-    df = df.astype(str)
-    for col in df.columns:
-        df[col] = df[col].apply(clean)
+    return db
 
-    return {"users": df}
+def save(db):
+    with pd.ExcelWriter(FILE, engine="openpyxl", mode="w") as w:
+        for s,df in db.items():
+            df.to_excel(w, sheet_name=s, index=False)
+    st.session_state.db = load()
 
-# ================= UI BACKGROUND =================
-def set_bg():
-    st.markdown(
-        """
-        <style>
-        .stApp {
-            background-image: url("campus.jpg");
-            background-size: cover;
-            background-position: center;
-        }
+# ================= PDF =================
+def report_pdf(sid, df):
+    file=f"{sid}_report.pdf"
+    doc=SimpleDocTemplate(file,pagesize=A4)
 
-        .login-box {
-            background-color: rgba(255,255,255,0.92);
-            padding: 35px;
-            border-radius: 15px;
-            width: 350px;
-            margin: auto;
-            margin-top: 120px;
-            box-shadow: 0px 0px 25px rgba(0,0,0,0.3);
-        }
+    data=[["Subject","Marks","Grade"]]
+    for _,r in df.iterrows():
+        data.append([r["subject"],r["marks"],r["grade"]])
 
-        .title {
-            text-align: center;
-            font-size: 28px;
-            font-weight: bold;
-            color: #C9A227;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+    table=Table(data)
+    table.setStyle(TableStyle([
+        ("GRID",(0,0),(-1,-1),1,colors.black)
+    ]))
+
+    doc.build([table])
+    return file
 
 # ================= SESSION =================
 if "db" not in st.session_state:
     st.session_state.db = load()
 
 if "login" not in st.session_state:
-    st.session_state.login = False
+    st.session_state.login=False
 
 # ================= LOGIN =================
 if not st.session_state.login:
-
-    set_bg()
-
-    st.markdown('<div class="login-box">', unsafe_allow_html=True)
-
-    st.markdown('<p class="title">🏫 Campus ERP Login</p>', unsafe_allow_html=True)
-
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-    r = st.selectbox("Role", ["Admin","Faculty","Student"])
+    u=st.text_input("Username")
+    p=st.text_input("Password",type="password")
+    r=st.selectbox("Role",["Admin","Faculty","Student"])
 
     if st.button("Login"):
+        users=st.session_state.db["users"]
 
-        users = st.session_state.db["users"]
-
-        # ADMIN LOGIN
-        if u == "admin" and p == "admin123":
-            st.session_state.login = True
-            st.session_state.role = "Admin"
+        if u=="admin" and p=="admin123":
+            st.session_state.login=True
+            st.session_state.role="Admin"
             st.rerun()
 
-        # USER LOGIN
-        match = users[
-            (users["username"] == u) &
-            (users["password"] == p) &
-            (users["role"] == r)
-        ]
+        m=users[(users.username==u)&(users.password==p)&(users.role==r)]
 
-        if not match.empty:
-            st.session_state.login = True
-            st.session_state.role = r
-
-            if r == "Student":
-                st.session_state.link = match.iloc[0]["student_id"]
-            else:
-                st.session_state.link = match.iloc[0]["faculty_id"]
-
+        if not m.empty:
+            st.session_state.login=True
+            st.session_state.role=r
+            st.session_state.link=m.iloc[0]["student_id"]
             st.rerun()
-        else:
-            st.error("❌ Invalid Login")
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ================= AFTER LOGIN =================
+# ================= MAIN =================
 else:
-    st.success(f"Welcome {st.session_state.role} 🎉")
+    db=st.session_state.db
+    role=st.session_state.role
 
-    if st.button("Logout"):
-        st.session_state.clear()
-        st.rerun()
-# ================= MAIN APP =================
-else:
-    db = st.session_state.db
-    role = st.session_state.role
-
-    st.sidebar.title(f"👤 {role} Panel")
-
-    # ================= MENU =================
-    if role == "Admin":
-        menu = ["Dashboard","Students","Faculty","Schedule","Logout"]
-    elif role == "Faculty":
-        menu = ["Students","My Schedule","Marks Entry","Attendance","Logout"]
+    if role=="Admin":
+        menu=["Students","Faculty","Schedule","Logout"]
+    elif role=="Faculty":
+        menu=["Marks","Logout"]
     else:
-        menu = ["My Results","Certificate","Logout"]
+        menu=["Results","Logout"]
 
-    choice = st.sidebar.radio("Menu", menu)
+    ch=st.sidebar.radio("Menu",menu)
 
     # ================= ADMIN =================
-    if role == "Admin":
-
-        if choice == "Dashboard":
-            st.title("📊 Admin Dashboard")
-
-            st.metric("Students", len(db["students"]))
-            st.metric("Faculty", len(db["faculty"]))
-            st.metric("Rooms", len(db["rooms"]))
+    if role=="Admin":
 
         # ===== STUDENTS =====
-        elif choice == "Students":
-            st.subheader("Students Data")
+        if ch=="Students":
+            st.subheader("Students")
             st.dataframe(db["students"])
 
-            st.subheader("➕ Add Student")
+            sid=st.text_input("ID")
+            name=st.text_input("Name")
+            course=st.text_input("Course")
+            email=st.text_input("Email")
 
-            sid = st.text_input("Student ID")
-            name = st.text_input("Name")
-            course = st.text_input("Course")
-            email = st.text_input("Email")
+            col1,col2,col3=st.columns(3)
 
-            if st.button("Add Student"):
-                new = pd.DataFrame([[sid,name,course,email]],
-                                   columns=SCHEMA["students"])
-                db["students"] = pd.concat([db["students"],new],ignore_index=True)
+            # ADD
+            if col1.button("Add"):
+                new=pd.DataFrame([[sid,name,course,email]],columns=SCHEMA["students"])
+                db["students"]=pd.concat([db["students"],new],ignore_index=True)
                 save(db)
-                st.success("Student Added")
-                st.rerun()
+                st.success("Added")
+
+            # UPDATE
+            if col2.button("Update"):
+                db["students"].loc[db["students"]["student_id"]==sid,["name","course","email"]] = [name,course,email]
+                save(db)
+                st.success("Updated")
+
+            # DELETE
+            if col3.button("Delete"):
+                db["students"]=db["students"][db["students"]["student_id"]!=sid]
+                save(db)
+                st.success("Deleted")
 
         # ===== FACULTY =====
-        elif choice == "Faculty":
-            st.subheader("Faculty Data")
+        elif ch=="Faculty":
+            st.subheader("Faculty")
             st.dataframe(db["faculty"])
 
-            fid = st.text_input("Faculty ID")
-            fname = st.text_input("Name")
-            sub = st.text_input("Subject")
+            fid=st.text_input("FID")
+            name=st.text_input("Name")
+            sub=st.text_input("Subject")
 
-            if st.button("Add Faculty"):
-                new = pd.DataFrame([[fid,fname,sub]],
-                                   columns=SCHEMA["faculty"])
-                db["faculty"] = pd.concat([db["faculty"],new],ignore_index=True)
+            col1,col2,col3=st.columns(3)
+
+            if col1.button("Add F"):
+                db["faculty"]=pd.concat([db["faculty"],
+                pd.DataFrame([[fid,name,sub]],columns=SCHEMA["faculty"])])
                 save(db)
-                st.success("Faculty Added")
-                st.rerun()
+
+            if col2.button("Update F"):
+                db["faculty"].loc[db["faculty"]["faculty_id"]==fid,["name","subject"]] = [name,sub]
+                save(db)
+
+            if col3.button("Delete F"):
+                db["faculty"]=db["faculty"][db["faculty"]["faculty_id"]!=fid]
+                save(db)
 
         # ===== SCHEDULE =====
-        elif choice == "Schedule":
+        elif ch=="Schedule":
             st.subheader("Schedule")
             st.dataframe(db["schedule"])
 
-            cid = st.text_input("Class ID")
-            fid = st.text_input("Faculty ID")
-            room = st.text_input("Room ID")
-            time = st.text_input("Time Slot")
-            sub = st.text_input("Subject")
+            cid=st.text_input("CID")
+            fid=st.text_input("FID")
+            room=st.text_input("Room")
+            time=st.text_input("Time")
+            sub=st.text_input("Subject")
 
-            if st.button("Add Schedule"):
-                new = pd.DataFrame([[cid,fid,room,time,sub]],
-                                   columns=SCHEMA["schedule"])
-                db["schedule"] = pd.concat([db["schedule"],new],ignore_index=True)
+            col1,col2,col3=st.columns(3)
+
+            if col1.button("Add S"):
+                db["schedule"]=pd.concat([db["schedule"],
+                pd.DataFrame([[cid,fid,room,time,sub]],columns=SCHEMA["schedule"])])
                 save(db)
-                st.success("Schedule Added")
-                st.rerun()
 
-        elif choice == "Logout":
+            if col2.button("Update S"):
+                db["schedule"].loc[db["schedule"]["class_id"]==cid,
+                ["faculty_id","room_id","time_slot","subject"]] = [fid,room,time,sub]
+                save(db)
+
+            if col3.button("Delete S"):
+                db["schedule"]=db["schedule"][db["schedule"]["class_id"]!=cid]
+                save(db)
+
+        elif ch=="Logout":
             st.session_state.clear()
             st.rerun()
 
     # ================= FACULTY =================
-    elif role == "Faculty":
+    elif role=="Faculty":
 
-        if choice == "Students":
-            st.title("👩‍🎓 Students")
-            st.dataframe(db["students"])
-
-        elif choice == "My Schedule":
-            fid = st.session_state.link
-            st.title("📅 My Schedule")
-            st.dataframe(db["schedule"][db["schedule"]["faculty_id"] == fid])
-
-        elif choice == "Marks Entry":
-            st.title("Marks Entry")
-
-            sid = st.text_input("Student ID")
-            sub = st.text_input("Subject")
-            m = st.number_input("Marks",0,100)
+        if ch=="Marks":
+            sid=st.text_input("Student ID")
+            sub=st.text_input("Subject")
+            m=st.number_input("Marks",0,100)
 
             if st.button("Save"):
-                g = "A+" if m>=90 else "A" if m>=75 else "B" if m>=60 else "C" if m>=40 else "F"
-
-                new = pd.DataFrame([[sid,sub,m,g]],
-                                   columns=SCHEMA["results"])
-                db["results"] = pd.concat([db["results"],new],ignore_index=True)
+                g="A+" if m>=90 else "A" if m>=75 else "B" if m>=60 else "C" if m>=40 else "F"
+                db["results"]=pd.concat([db["results"],
+                pd.DataFrame([[sid,sub,m,g]],columns=SCHEMA["results"])])
                 save(db)
-                st.success("Marks Saved")
-                st.rerun()
+                st.success("Saved")
 
-        elif choice == "Attendance":
-            st.title("Attendance")
-
-            for _,r in db["students"].iterrows():
-                status = st.selectbox(r["name"],["Present","Absent"], key=r["student_id"])
-
-                if st.button(f"Save {r['student_id']}"):
-                    new = pd.DataFrame([[r["student_id"],"C1",str(datetime.today().date()),status]],
-                                       columns=SCHEMA["attendance"])
-                    db["attendance"] = pd.concat([db["attendance"],new],ignore_index=True)
-                    save(db)
-                    st.success("Saved")
-
-        elif choice == "Logout":
+        elif ch=="Logout":
             st.session_state.clear()
             st.rerun()
 
     # ================= STUDENT =================
-    elif role == "Student":
+    elif role=="Student":
 
-        sid = st.session_state.link
+        sid=st.session_state.link
+        df=db["results"][db["results"]["student_id"]==sid]
 
-        if choice == "My Results":
-            st.title("📄 My Results")
+        st.dataframe(df)
 
-            df = db["results"][db["results"]["student_id"] == sid]
-            st.dataframe(df)
+        if st.button("Download Report"):
+            f=report_pdf(sid,df)
 
-            if st.button("Download Report"):
-                file = report_pdf(sid,"Student","Course",df)
+            with open(f,"rb") as file:
+                st.download_button(
+                    "Download PDF",
+                    data=file.read(),
+                    file_name=f"{sid}_report.pdf",
+                    mime="application/pdf"
+                )
 
-                with open(file,"rb") as f:
-                    st.download_button(
-                        label="📄 Download Report Card",
-                        data=f.read(),
-                        file_name=f"{sid}_report.pdf",
-                        mime="application/pdf"
-                    )
-
-        elif choice == "Certificate":
-            st.title("🎓 Certificate")
-
-            if st.button("Download Certificate"):
-                file = certificate_pdf(sid,"Student","Course")
-
-                with open(file,"rb") as f:
-                    st.download_button(
-                        label="🎓 Download Certificate",
-                        data=f.read(),
-                        file_name=f"{sid}_certificate.pdf",
-                        mime="application/pdf"
-                    )
-
-        elif choice == "Logout":
+        if ch=="Logout":
             st.session_state.clear()
             st.rerun()
