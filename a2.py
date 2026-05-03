@@ -28,19 +28,19 @@ SCHEMA = {
     "results": ["student_id","subject","marks","grade"]
 }
 
-# ================= UI STYLE =================
+# ================= UI =================
 st.markdown("""
 <style>
-.main {background: linear-gradient(135deg,#eef2ff,#f8fafc);}
-.stButton>button {width:100%;border-radius:10px;height:45px;background:#2563eb;color:white;}
-section[data-testid="stSidebar"] {background:#0f172a;color:white;}
-.metric-card {background:white;padding:20px;border-radius:12px;box-shadow:0px 4px 10px rgba(0,0,0,0.1);}
+.main {background:#f4f6fb;}
+section[data-testid="stSidebar"] {background:#1e293b;}
+section[data-testid="stSidebar"] * {color:white;}
+.stButton>button {width:100%;height:45px;border-radius:10px;background:#2563eb;color:white;}
+.card {background:white;padding:20px;border-radius:12px;box-shadow:0px 4px 10px rgba(0,0,0,0.1);}
 </style>
 """, unsafe_allow_html=True)
 
 # ================= UTIL =================
-def clean(x):
-    return str(x).strip().replace(".0","")
+def clean(x): return str(x).strip().replace(".0","")
 
 def grade(m):
     m=int(m)
@@ -72,22 +72,20 @@ def save(db):
     st.session_state.db = load()
 
 # ================= QR =================
-def generate_qr(data,file):
+def qr(data,file):
     img=qrcode.make(data)
     img.save(file)
     return file
 
-# ================= PDF =================
+# ================= PDF REPORT =================
 def report_pdf(sid,name,course,df):
     file=f"{sid}_report.pdf"
     doc=SimpleDocTemplate(file,pagesize=A4)
     styles=getSampleStyleSheet()
     content=[]
 
-    qr=generate_qr(f"{sid}-{name}",f"{sid}_qr.png")
-
     if os.path.exists("logo.png"):
-        content.append(Image("logo.png",1.2*inch,1.2*inch,hAlign='CENTER'))
+        content.append(Image("logo.png",1.3*inch,1.3*inch,hAlign='CENTER'))
 
     title=ParagraphStyle(name="t",fontSize=22,alignment=TA_CENTER,textColor=colors.HexColor("#C9A227"))
     content.append(Paragraph("ACADEMIC REPORT CARD",title))
@@ -110,37 +108,8 @@ def report_pdf(sid,name,course,df):
     content.append(t)
 
     content.append(Spacer(1,20))
-    content.append(Image(qr,1.5*inch,1.5*inch))
-
-    if os.path.exists("signature.png"):
-        content.append(Image("signature.png",2*inch,1*inch))
-
-    def border(c,d):
-        c.setStrokeColor(colors.HexColor("#C9A227"))
-        c.setLineWidth(4)
-        c.rect(20,20,555,800)
-
-    doc.build(content,onFirstPage=border)
-    return file
-
-def certificate_pdf(sid,name,course):
-    file=f"{sid}_certificate.pdf"
-    doc=SimpleDocTemplate(file,pagesize=A4)
-    styles=getSampleStyleSheet()
-    content=[]
-
-    qr=generate_qr(f"CERT-{sid}",f"{sid}_certqr.png")
-
-    title=ParagraphStyle(name="t",fontSize=26,alignment=TA_CENTER,textColor=colors.HexColor("#C9A227"))
-    content.append(Paragraph("CERTIFICATE OF COMPLETION",title))
-    content.append(Spacer(1,30))
-
-    content.append(Paragraph(f"This certifies {name}",styles["Normal"]))
-    content.append(Paragraph(f"ID: {sid}",styles["Normal"]))
-    content.append(Paragraph(f"Course: {course}",styles["Normal"]))
-
-    content.append(Spacer(1,20))
-    content.append(Image(qr,1.6*inch,1.6*inch))
+    q=qr(f"{sid}-{name}",f"{sid}_qr.png")
+    content.append(Image(q,1.5*inch,1.5*inch))
 
     if os.path.exists("signature.png"):
         content.append(Image("signature.png",2*inch,1*inch))
@@ -148,18 +117,41 @@ def certificate_pdf(sid,name,course):
     doc.build(content)
     return file
 
-# ================= CONFLICT =================
-def conflicts(df):
-    res=set()
-    for i in range(len(df)):
-        for j in range(i+1,len(df)):
-            a,b=df.iloc[i],df.iloc[j]
-            if a["time_slot"]==b["time_slot"]:
-                if a["room_id"]==b["room_id"]:
-                    res.add("Room conflict")
-                if a["faculty_id"]==b["faculty_id"]:
-                    res.add("Faculty conflict")
-    return list(res)
+# ================= CERTIFICATE =================
+def certificate_pdf(sid,name,course):
+    file=f"{sid}_certificate.pdf"
+    doc=SimpleDocTemplate(file,pagesize=A4)
+    styles=getSampleStyleSheet()
+    content=[]
+
+    if os.path.exists("logo.png"):
+        content.append(Image("logo.png",1.5*inch,1.5*inch,hAlign='CENTER'))
+
+    title=ParagraphStyle(name="t",fontSize=28,alignment=TA_CENTER,textColor=colors.HexColor("#C9A227"))
+    content.append(Paragraph("CERTIFICATE OF COMPLETION",title))
+    content.append(Spacer(1,30))
+
+    content.append(Paragraph("This is to certify that",styles["Normal"]))
+    content.append(Spacer(1,10))
+
+    content.append(Paragraph(f"<b>{name}</b>",ParagraphStyle(name="n",fontSize=24,alignment=TA_CENTER)))
+    content.append(Spacer(1,20))
+
+    content.append(Paragraph(f"Student ID: {sid}",styles["Normal"]))
+    content.append(Paragraph(f"Completed course {course}",styles["Normal"]))
+
+    content.append(Spacer(1,30))
+    content.append(Paragraph(f"Date: {datetime.today().date()}",styles["Normal"]))
+
+    q=qr(f"CERT-{sid}",f"{sid}_certqr.png")
+    content.append(Image(q,1.6*inch,1.6*inch,hAlign='CENTER'))
+
+    if os.path.exists("signature.png"):
+        content.append(Spacer(1,30))
+        content.append(Image("signature.png",2*inch,1*inch,hAlign='CENTER'))
+
+    doc.build(content)
+    return file
 
 # ================= SESSION =================
 if "db" not in st.session_state:
@@ -171,14 +163,14 @@ if "login" not in st.session_state:
 # ================= LOGIN =================
 if not st.session_state.login:
 
-    col1,col2=st.columns([1.2,1])
+    c1,c2=st.columns([1.2,1])
 
-    with col1:
+    with c1:
         if os.path.exists("campus.jpg"):
             st.image("campus.jpg",use_container_width=True)
 
-    with col2:
-        st.markdown("## 🎓 Campus ERP Login")
+    with c2:
+        st.title("🎓 Campus ERP Login")
 
         u=st.text_input("Username")
         p=st.text_input("Password",type="password")
@@ -212,13 +204,13 @@ else:
     if role=="Admin":
         menu=["Dashboard","Students","Faculty","Schedule","Logout"]
     elif role=="Faculty":
-        menu=["My Schedule","Marks","Logout"]
+        menu=["My Schedule","Marks","Attendance","Logout"]
     else:
         menu=["My Results","Certificate","Logout"]
 
     ch=st.sidebar.radio("Menu",menu)
 
-    # ===== ADMIN =====
+    # ADMIN
     if role=="Admin":
 
         if ch=="Dashboard":
@@ -226,19 +218,14 @@ else:
             st.metric("Faculty",len(db["faculty"]))
             st.metric("Rooms",len(db["rooms"]))
 
-            c=conflicts(db["schedule"])
-            if c: st.error(c)
-
         elif ch=="Students":
             st.dataframe(db["students"])
-
         elif ch=="Faculty":
             st.dataframe(db["faculty"])
-
         elif ch=="Schedule":
             st.dataframe(db["schedule"])
 
-    # ===== FACULTY =====
+    # FACULTY
     elif role=="Faculty":
 
         if ch=="My Schedule":
@@ -250,34 +237,41 @@ else:
             m=st.number_input("Marks",0,100)
 
             if st.button("Save"):
-                g=grade(m)
                 db["results"]=pd.concat([db["results"],
-                pd.DataFrame([[sid,sub,m,g]],columns=SCHEMA["results"])])
+                pd.DataFrame([[sid,sub,m,grade(m)]],columns=SCHEMA["results"])])
                 save(db)
 
-    # ===== STUDENT =====
+        elif ch=="Attendance":
+            sid=st.text_input("Student ID")
+            cid=st.text_input("Class ID")
+            status=st.selectbox("Status",["Present","Absent"])
+
+            if st.button("Save"):
+                db["attendance"]=pd.concat([db["attendance"],
+                pd.DataFrame([[sid,cid,str(datetime.today().date()),status]],columns=SCHEMA["attendance"])])
+                save(db)
+
+    # STUDENT
     elif role=="Student":
 
+        sid=str(st.session_state.link).replace(".0","")
+        df=db["results"].copy()
+        df["student_id"]=df["student_id"].astype(str).str.replace(".0","",regex=False)
+
+        student_df=df[df["student_id"]==sid]
+        st.dataframe(student_df)
+
+        info=db["students"][db["students"]["student_id"]==sid]
+        name=info.iloc[0]["name"] if not info.empty else "Student"
+        course=info.iloc[0]["course"] if not info.empty else "Course"
+
         if ch=="My Results":
-            sid=st.session_state.link
-            df=db["results"][db["results"]["student_id"]==sid]
-            st.dataframe(df)
-
-            info=db["students"][db["students"]["student_id"]==sid]
-            name=info.iloc[0]["name"] if not info.empty else "Student"
-            course=info.iloc[0]["course"] if not info.empty else "Course"
-
             if st.button("Download Report"):
-                f=report_pdf(sid,name,course,df)
+                f=report_pdf(sid,name,course,student_df)
                 with open(f,"rb") as file:
                     st.download_button("Download",file.read(),file_name=f"{sid}_report.pdf",mime="application/pdf")
 
         elif ch=="Certificate":
-            sid=st.session_state.link
-            info=db["students"][db["students"]["student_id"]==sid]
-            name=info.iloc[0]["name"]
-            course=info.iloc[0]["course"]
-
             if st.button("Download Certificate"):
                 f=certificate_pdf(sid,name,course)
                 with open(f,"rb") as file:
