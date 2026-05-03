@@ -255,7 +255,7 @@ else:
     if ch == "My Schedule":
           st.subheader("📅 My Schedule")
           df = db["schedule"].copy()
-        df["faculty_id"] = df["faculty_id"].astype(str)
+          df["faculty_id"] = df["faculty_id"].astype(str)
 
         my_schedule = df[df["faculty_id"] == faculty_id]
 
