@@ -92,18 +92,33 @@ def report_pdf(sid,name,course,df):
     styles = getSampleStyleSheet()
     content = []
 
-    title = ParagraphStyle(name="t", fontSize=22, alignment=TA_CENTER, textColor=colors.HexColor("#C9A227"))
+    title = ParagraphStyle(name="t", fontSize=28, alignment=TA_CENTER, textColor=colors.HexColor("#C9A227"))
 
+    # BIG LOGO
     if os.path.exists("logo.png"):
-        content.append(Image("logo.png",1.2*inch,1.2*inch,hAlign='CENTER'))
+        content.append(Image("logo.png",3*inch,1.8*inch,hAlign='CENTER'))
 
     content.append(Paragraph("ACADEMIC REPORT CARD", title))
     content.append(Spacer(1,20))
 
-    content.append(Paragraph(f"Name: {name}", styles["Normal"]))
-    content.append(Paragraph(f"Student ID: {sid}", styles["Normal"]))
-    content.append(Paragraph(f"Course: {course}", styles["Normal"]))
+    # STUDENT INFO
+    info_data = [
+        [Paragraph(f"<b>Name:</b> {name}", styles["Normal"])],
+        [Paragraph(f"<b>Student ID:</b> {sid}", styles["Normal"])],
+        [Paragraph(f"<b>Course:</b> {course}", styles["Normal"])],
+    ]
 
+    qr = make_qr(f"{sid}-{name}", f"{sid}_qr.png")
+
+    # QR LEFT + CONTENT RIGHT
+    layout = Table([
+        [Image(qr,2*inch,2*inch), info_data]
+    ])
+
+    content.append(layout)
+    content.append(Spacer(1,20))
+
+    # TABLE
     data = [["Subject","Marks","Grade"]]
     for _,r in df.iterrows():
         data.append([r["subject"],r["marks"],r["grade"]])
@@ -118,10 +133,13 @@ def report_pdf(sid,name,course,df):
     content.append(table)
 
     avg = df["marks"].astype(float).mean() if not df.empty else 0
-    content.append(Paragraph(f"Average: {round(avg,2)}", styles["Normal"]))
+    content.append(Spacer(1,10))
+    content.append(Paragraph(f"<b>Average Score:</b> {round(avg,2)}", styles["Normal"]))
 
-    qr = make_qr(f"{sid}-{name}", f"{sid}_qr.png")
-    content.append(Image(qr,1.5*inch,1.5*inch))
+    # SIGNATURE
+    if os.path.exists("signature.png"):
+        content.append(Spacer(1,30))
+        content.append(Image("signature.png",2.2*inch,1*inch,hAlign='RIGHT'))
 
     doc.build(content)
     return file
@@ -133,24 +151,40 @@ def certificate_pdf(sid,name,course):
     styles = getSampleStyleSheet()
     content = []
 
+    # BIG LOGO
     if os.path.exists("logo.png"):
-        content.append(Image("logo.png",1.5*inch,1.5*inch,hAlign='CENTER'))
+        content.append(Image("logo.png",3*inch,2*inch,hAlign='CENTER'))
 
-    title = ParagraphStyle(name="t", fontSize=26, alignment=TA_CENTER, textColor=colors.HexColor("#C9A227"))
+    title = ParagraphStyle(name="t", fontSize=30, alignment=TA_CENTER, textColor=colors.HexColor("#C9A227"))
 
     content.append(Paragraph("CERTIFICATE OF COMPLETION", title))
-    content.append(Spacer(1,30))
+    content.append(Spacer(1,25))
 
-    content.append(Paragraph("This is to certify that", styles["Normal"]))
-    content.append(Paragraph(f"<b>{name}</b>", styles["Normal"]))
-    content.append(Spacer(1,20))
+    # BIG PARAGRAPH
+    para = ParagraphStyle(name="p", fontSize=16, alignment=TA_CENTER, leading=22)
 
-    content.append(Paragraph(f"Student ID: {sid}", styles["Normal"]))
-    content.append(Paragraph(f"Course: {course}", styles["Normal"]))
+    content.append(Paragraph("This is to certify that", para))
+    content.append(Spacer(1,10))
+    content.append(Paragraph(f"<b style='font-size:22px'>{name}</b>", para))
+    content.append(Spacer(1,15))
+    content.append(Paragraph(f"has successfully completed the course", para))
+    content.append(Paragraph(f"<b>{course}</b>", para))
 
-    qr = make_qr(f"CERT-{sid}", f"{sid}_certqr.png")
-    content.append(Spacer(1,20))
-    content.append(Image(qr,1.5*inch,1.5*inch))
+    content.append(Spacer(1,25))
+
+    qr = make_qr(f"CERT-{sid}-{name}", f"{sid}_certqr.png")
+
+    # QR LEFT SIDE + TEXT RIGHT
+    layout = Table([
+        [Image(qr,2.2*inch,2.2*inch), Paragraph(f"Student ID: {sid}", styles["Normal"])]
+    ])
+
+    content.append(layout)
+
+    # SIGNATURE
+    if os.path.exists("signature.png"):
+        content.append(Spacer(1,30))
+        content.append(Image("signature.png",2.5*inch,1.2*inch,hAlign='CENTER'))
 
     doc.build(content)
     return file
@@ -308,20 +342,21 @@ else:
     # ================= STUDENT =================
     elif role=="Student":
 
-        sid = str(st.session_state.link)
+        sid = str(st.session_state.link).strip()
 
         if ch=="My Results":
             df=db["results"].copy()
-            df["student_id"] = df["student_id"].astype(str)
+            df["student_id"] = df["student_id"].astype(str).str.strip()
+            df["marks"] = pd.to_numeric(df["marks"], errors="coerce")
             st.dataframe(df[df["student_id"]==sid])
 
         elif ch=="My Attendance":
             df=db["attendance"].copy()
-            df["student_id"] = df["student_id"].astype(str)
+            df["student_id"] = df["student_id"].astype(str).str.strip()
             st.dataframe(df[df["student_id"]==sid])
 
         elif ch=="Certificate":
-            info=db["students"][db["students"]["student_id"]==sid]
+            info=db["students"][db["students"]["student_id"].astype(str).str.strip()==sid]
             name=info.iloc[0]["name"] if not info.empty else "Student"
             course=info.iloc[0]["course"] if not info.empty else "Course"
 
@@ -330,6 +365,27 @@ else:
                 with open(f,"rb") as file:
                     st.download_button("Download",file.read(),file_name=f)
 
+        elif ch=="Report Card":
+            df=db["results"].copy()
+            df["student_id"] = df["student_id"].astype(str).str.strip()
+            df["marks"] = pd.to_numeric(df["marks"], errors="coerce")
+
+            my=df[df["student_id"]==sid]
+
+            if my.empty:
+                st.warning("No results found")
+            else:
+                info=db["students"][db["students"]["student_id"].astype(str).str.strip()==sid]
+                name=info.iloc[0]["name"] if not info.empty else "Student"
+                course=info.iloc[0]["course"] if not info.empty else "Course"
+
+                if st.button("Download Report Card"):
+                    f=report_pdf(sid,name,course,my)
+                    with open(f,"rb") as file:
+                        st.download_button("Download Report",file.read(),file_name=f)
+
     if ch=="Logout":
+        st.session_state.clear()
+        st.rerun()
         st.session_state.clear()
         st.rerun()
