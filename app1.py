@@ -41,37 +41,35 @@ def load():
             for s, cols in SCHEMA.items():
                 pd.DataFrame(columns=cols).to_excel(w, sheet_name=s, index=False)
 
-    db={}
+    db = {}
     xls = pd.ExcelFile(FILE)
 
     for s in SCHEMA:
-        df = pd.read_excel(FILE, sheet_name=s) if s in xls.sheet_names else pd.DataFrame(columns=SCHEMA[s])
-        df = df.astype(str).applymap(clean)
-        db[s]=df
+        if s in xls.sheet_names:
+            df = pd.read_excel(FILE, sheet_name=s)
+        else:
+            df = pd.DataFrame(columns=SCHEMA[s])
+
+        # ✅ FIXED (NO applymap)
+        df = df.astype(str)
+        for col in df.columns:
+            df[col] = df[col].apply(clean)
+
+        db[s] = df
 
     return db
 
 def save(db):
     with pd.ExcelWriter(FILE, engine="openpyxl", mode="w") as w:
-        for s,df in db.items():
+        for s, df in db.items():
             df.to_excel(w, sheet_name=s, index=False)
+
     st.session_state.db = load()
 
 # ================= GRADE =================
 def grade(m):
-    m=int(m)
+    m = int(m)
     return "A+" if m>=90 else "A" if m>=75 else "B" if m>=60 else "C" if m>=40 else "F"
-
-# ================= EMAIL =================
-def send_email(to, sub, body):
-    try:
-        s = smtplib.SMTP("smtp.gmail.com",587)
-        s.starttls()
-        s.login("your_email@gmail.com","app_password")
-        s.sendmail("your_email@gmail.com",to,f"Subject:{sub}\n\n{body}")
-        s.quit()
-    except:
-        pass
 
 # ================= QR =================
 def generate_qr(data, file):
@@ -84,10 +82,9 @@ def report_pdf(sid,name,course,df):
     file=f"{sid}_report.pdf"
     doc=SimpleDocTemplate(file,pagesize=A4)
     styles=getSampleStyleSheet()
-
     content=[]
 
-    qr_file=generate_qr(f"{name}-{sid}-{course}",f"{sid}_qr.png")
+    qr=generate_qr(f"{name}-{sid}-{course}",f"{sid}_qr.png")
 
     if os.path.exists("logo.png"):
         content.append(Image("logo.png",1.2*inch,1.2*inch,hAlign='CENTER'))
@@ -99,7 +96,6 @@ def report_pdf(sid,name,course,df):
     content.append(Paragraph(f"Name: {name}",styles["Normal"]))
     content.append(Paragraph(f"Student ID: {sid}",styles["Normal"]))
     content.append(Paragraph(f"Course: {course}",styles["Normal"]))
-    content.append(Spacer(1,10))
 
     data=[["Subject","Marks","Grade"]]
     for _,r in df.iterrows():
@@ -114,15 +110,13 @@ def report_pdf(sid,name,course,df):
     content.append(t)
 
     avg=df["marks"].astype(int).mean()
-    content.append(Spacer(1,10))
     content.append(Paragraph(f"Average: {round(avg,2)}",styles["Normal"]))
 
     content.append(Spacer(1,20))
-    content.append(Paragraph("Scan to Verify",styles["Normal"]))
-    content.append(Image(qr_file,1.5*inch,1.5*inch))
+    content.append(Image(qr,1.5*inch,1.5*inch))
 
     if os.path.exists("signature.png"):
-        content.append(Spacer(1,30))
+        content.append(Spacer(1,20))
         content.append(Image("signature.png",2*inch,1*inch))
 
     def border(c,d):
@@ -138,10 +132,9 @@ def certificate_pdf(sid,name,course):
     file=f"{sid}_certificate.pdf"
     doc=SimpleDocTemplate(file,pagesize=A4)
     styles=getSampleStyleSheet()
-
     content=[]
 
-    qr_file=generate_qr(f"Certificate-{name}-{sid}",f"{sid}_certqr.png")
+    qr=generate_qr(f"Certificate-{name}-{sid}",f"{sid}_certqr.png")
 
     if os.path.exists("logo.png"):
         content.append(Image("logo.png",1.5*inch,1.5*inch,hAlign='CENTER'))
@@ -154,12 +147,11 @@ def certificate_pdf(sid,name,course):
     content.append(Paragraph(f"Student ID: {sid}",styles["Normal"]))
     content.append(Paragraph(f"Completed course {course}",styles["Normal"]))
 
-    content.append(Spacer(1,30))
-    content.append(Paragraph("Scan to Verify",styles["Normal"]))
-    content.append(Image(qr_file,1.6*inch,1.6*inch))
+    content.append(Spacer(1,20))
+    content.append(Image(qr,1.6*inch,1.6*inch))
 
     if os.path.exists("signature.png"):
-        content.append(Spacer(1,40))
+        content.append(Spacer(1,30))
         content.append(Image("signature.png",2*inch,1*inch))
 
     def border(c,d):
@@ -185,98 +177,68 @@ def conflicts(df):
 
 # ================= SESSION =================
 if "db" not in st.session_state:
-    st.session_state.db=load()
+    st.session_state.db = load()
 
 if "login" not in st.session_state:
-    st.session_state.login=False
+    st.session_state.login = False
 
 # ================= LOGIN =================
 if not st.session_state.login:
-    u=st.text_input("Username")
-    p=st.text_input("Password",type="password")
-    r=st.selectbox("Role",["Admin","Faculty","Student"])
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
+    r = st.selectbox("Role", ["Admin","Faculty","Student"])
 
     if st.button("Login"):
-        users=st.session_state.db["users"]
+        users = st.session_state.db["users"]
 
         if u=="admin" and p=="admin123":
             st.session_state.login=True
             st.session_state.role="Admin"
             st.rerun()
 
-        m=users[(users.username==u)&(users.password==p)&(users.role==r)]
+        m = users[(users.username==u)&(users.password==p)&(users.role==r)]
 
         if not m.empty:
             st.session_state.login=True
             st.session_state.role=r
-            st.session_state.link=m.iloc[0]["student_id"] if r=="Student" else m.iloc[0]["faculty_id"]
+            st.session_state.link = m.iloc[0]["student_id"] if r=="Student" else m.iloc[0]["faculty_id"]
             st.rerun()
+        else:
+            st.error("Invalid login")
 
 # ================= MAIN =================
 else:
-    db=st.session_state.db
-    role=st.session_state.role
+    db = st.session_state.db
+    role = st.session_state.role
 
     if role=="Admin":
         menu=["Dashboard","Students","Faculty","Schedule","Logout"]
     elif role=="Faculty":
-        menu=["Students","My Schedule","Marks","Attendance","Performance","Logout"]
+        menu=["Students","My Schedule","Marks","Attendance","Logout"]
     else:
         menu=["My Results","Certificate","Logout"]
 
-    ch=st.sidebar.radio("Menu",menu)
+    ch = st.sidebar.radio("Menu", menu)
 
-    # ===== ADMIN =====
     if ch=="Dashboard":
         st.metric("Students",len(db["students"]))
         st.metric("Faculty",len(db["faculty"]))
         st.metric("Rooms",len(db["rooms"]))
 
-        c=conflicts(db["schedule"])
+        c = conflicts(db["schedule"])
         if c: st.error(c)
 
     elif ch=="Students":
         st.dataframe(db["students"])
-        sid=st.text_input("ID")
-        name=st.text_input("Name")
-        course=st.text_input("Course")
-        email=st.text_input("Email")
-
-        if st.button("Add"):
-            db["students"]=pd.concat([db["students"],
-            pd.DataFrame([[sid,name,course,email]],columns=SCHEMA["students"])])
-            save(db)
 
     elif ch=="Faculty":
         st.dataframe(db["faculty"])
-        fid=st.text_input("FID")
-        name=st.text_input("Name")
-        sub=st.text_input("Subject")
-
-        if st.button("Add Faculty"):
-            db["faculty"]=pd.concat([db["faculty"],
-            pd.DataFrame([[fid,name,sub]],columns=SCHEMA["faculty"])])
-            save(db)
 
     elif ch=="Schedule":
         st.dataframe(db["schedule"])
-        cid=st.text_input("CID")
-        fid=st.text_input("FID")
-        room=st.text_input("Room")
-        time=st.text_input("Time")
-        sub=st.text_input("Subject")
-
-        if st.button("Add Schedule"):
-            db["schedule"]=pd.concat([db["schedule"],
-            pd.DataFrame([[cid,fid,room,time,sub]],columns=SCHEMA["schedule"])])
-            save(db)
-
-    # ===== FACULTY =====
-    elif ch=="Students":
-        st.dataframe(db["students"])
 
     elif ch=="My Schedule":
-        fid=st.session_state.link
+        fid = st.session_state.link
         st.dataframe(db["schedule"][db["schedule"]["faculty_id"]==fid])
 
     elif ch=="Marks":
@@ -290,23 +252,9 @@ else:
             pd.DataFrame([[sid,sub,m,g]],columns=SCHEMA["results"])])
             save(db)
 
-    elif ch=="Attendance":
-        for _,r in db["students"].iterrows():
-            status=st.selectbox(r["name"],["Present","Absent"],key=r["student_id"])
-            if st.button(f"Save {r['student_id']}"):
-                db["attendance"]=pd.concat([db["attendance"],
-                pd.DataFrame([[r["student_id"],"C1",str(datetime.today().date()),status]],
-                columns=SCHEMA["attendance"])])
-                save(db)
-
-    elif ch=="Performance":
-        st.plotly_chart(px.bar(db["results"],x="student_id",y="marks"))
-
-    # ===== STUDENT =====
     elif ch=="My Results":
         sid=st.session_state.link
         df=db["results"][db["results"]["student_id"]==sid]
-
         st.dataframe(df)
 
         info=db["students"][db["students"]["student_id"]==sid]
@@ -316,18 +264,18 @@ else:
         if st.button("Download Report"):
             f=report_pdf(sid,name,course,df)
             with open(f,"rb") as file:
-                st.download_button("Download PDF",file)
+                st.download_button("Download",file)
 
     elif ch=="Certificate":
         sid=st.session_state.link
         info=db["students"][db["students"]["student_id"]==sid]
-        name=info.iloc[0]["name"] if not info.empty else "Student"
-        course=info.iloc[0]["course"] if not info.empty else "Course"
+        name=info.iloc[0]["name"]
+        course=info.iloc[0]["course"]
 
         if st.button("Download Certificate"):
             f=certificate_pdf(sid,name,course)
             with open(f,"rb") as file:
-                st.download_button("Download Certificate",file)
+                st.download_button("Download",file)
 
     elif ch=="Logout":
         st.session_state.clear()
