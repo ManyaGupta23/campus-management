@@ -1,4 +1,4 @@
-# ================= CAMPUS ERP (UPGRADED FINAL VERSION) =================
+# ================= CAMPUS ERP (FINAL DEPLOY VERSION) =================
 
 import streamlit as st
 import pandas as pd
@@ -36,7 +36,7 @@ def grade(m):
     m = int(m)
     return "A+" if m>=90 else "A" if m>=75 else "B" if m>=60 else "C" if m>=40 else "F"
 
-# ================= FILE =================
+# ================= FILE HANDLING (FIXED) =================
 def load():
     if not os.path.exists(FILE):
         with pd.ExcelWriter(FILE, engine="openpyxl") as w:
@@ -47,11 +47,21 @@ def load():
     xls = pd.ExcelFile(FILE)
 
     for s in SCHEMA:
-        df = pd.read_excel(FILE, sheet_name=s) if s in xls.sheet_names else pd.DataFrame(columns=SCHEMA[s])
-        df = df.astype(str).applymap(clean)
+        if s in xls.sheet_names:
+            df = pd.read_excel(FILE, sheet_name=s)
+        else:
+            df = pd.DataFrame(columns=SCHEMA[s])
+
+        df = df.astype(str)
+
+        # ✅ FIXED (no applymap error)
+        for col in df.columns:
+            df[col] = df[col].apply(clean)
+
         db[s] = df
 
     return db
+
 
 def save(db):
     with pd.ExcelWriter(FILE, engine="openpyxl", mode="w") as w:
@@ -65,20 +75,18 @@ def make_qr(data, file):
     img.save(file)
     return file
 
-# ================= REPORT =================
+# ================= REPORT PDF =================
 def report_pdf(sid,name,course,df):
     file = f"{sid}_report.pdf"
     doc = SimpleDocTemplate(file, pagesize=A4)
     styles = getSampleStyleSheet()
     content = []
 
-    title = ParagraphStyle(name="t", fontSize=24, alignment=TA_CENTER)
-
-    content.append(Paragraph("REPORT CARD", title))
+    title = ParagraphStyle(name="t", fontSize=26, alignment=TA_CENTER)
+    content.append(Paragraph("ACADEMIC REPORT CARD", title))
     content.append(Spacer(1,20))
 
-    qr = make_qr(sid, f"{sid}_qr.png")
-
+    qr = make_qr(f"{sid}-{name}", f"{sid}_qr.png")
     content.append(Image(qr,2*inch,2*inch))
     content.append(Paragraph(f"Name: {name}", styles["Normal"]))
     content.append(Paragraph(f"Course: {course}", styles["Normal"]))
@@ -89,11 +97,13 @@ def report_pdf(sid,name,course,df):
 
     table = Table(data)
     table.setStyle(TableStyle([
-        ("GRID",(0,0),(-1,-1),1,colors.black),
-        ("BACKGROUND",(0,0),(-1,0),colors.grey)
+        ("BACKGROUND",(0,0),(-1,0),colors.grey),
+        ("GRID",(0,0),(-1,-1),1,colors.black)
     ]))
 
+    content.append(Spacer(1,15))
     content.append(table)
+
     doc.build(content)
     return file
 
@@ -104,16 +114,17 @@ def certificate_pdf(sid,name,course):
     styles = getSampleStyleSheet()
     content = []
 
-    title = ParagraphStyle(name="t", fontSize=26, alignment=TA_CENTER)
+    title = ParagraphStyle(name="t", fontSize=28, alignment=TA_CENTER)
+    content.append(Paragraph("CERTIFICATE OF COMPLETION", title))
+    content.append(Spacer(1,30))
 
-    content.append(Paragraph("CERTIFICATE", title))
+    para = ParagraphStyle(name="p", alignment=TA_CENTER, fontSize=16)
+    content.append(Paragraph(f"This is to certify that <b>{name}</b>", para))
+    content.append(Paragraph(f"has successfully completed <b>{course}</b>", para))
+
+    qr = make_qr(f"CERT-{sid}", f"{sid}_certqr.png")
     content.append(Spacer(1,20))
-
-    content.append(Paragraph(f"This certifies {name}", styles["Normal"]))
-    content.append(Paragraph(f"Completed {course}", styles["Normal"]))
-
-    qr = make_qr(sid, f"{sid}_cert.png")
-    content.append(Image(qr,2*inch,2*inch))
+    content.append(Image(qr,2*inch,2*inch,hAlign='CENTER'))
 
     doc.build(content)
     return file
@@ -157,7 +168,7 @@ else:
     db = st.session_state.db
     role = st.session_state.role
 
-    st.sidebar.title(role)
+    st.sidebar.title(f"👤 {role}")
 
     if role=="Admin":
         menu=["Dashboard","Manage Students","Manage Faculty","Logout"]
@@ -178,12 +189,12 @@ else:
         elif ch=="Manage Students":
             st.dataframe(db["students"])
 
-            sid=st.text_input("ID")
+            sid=st.text_input("Student ID")
             name=st.text_input("Name")
 
             if st.button("Add Student"):
                 if sid in db["students"]["student_id"].values:
-                    st.error("Student exists")
+                    st.error("Student already exists")
                 else:
                     db["students"] = pd.concat([
                         db["students"],
@@ -215,7 +226,7 @@ else:
             sub=st.text_input("Subject")
             m=st.number_input("Marks",0,100)
 
-            if st.button("Save"):
+            if st.button("Save Marks"):
                 db["results"] = pd.concat([
                     db["results"],
                     pd.DataFrame([[sid,sub,m,grade(m)]], columns=SCHEMA["results"])
@@ -251,10 +262,10 @@ else:
                 name = info.iloc[0]["name"] if not info.empty else "Student"
                 course = info.iloc[0]["course"] if not info.empty else "Course"
 
-                if st.button("Download Report"):
+                if st.button("📥 Download Report"):
                     f = report_pdf(sid,name,course,my)
                     with open(f,"rb") as file:
-                        st.download_button("Download",file.read(),file_name=f)
+                        st.download_button("Download Report",file.read(),file_name=f)
 
         elif ch=="My Attendance":
             df=db["attendance"].copy()
@@ -277,7 +288,7 @@ else:
             my=df[df["student_id"]==sid]
 
             if my.empty:
-                st.warning("No results")
+                st.warning("No results found")
             else:
                 info=db["students"][db["students"]["student_id"].astype(str).str.strip()==sid]
                 name=info.iloc[0]["name"] if not info.empty else "Student"
