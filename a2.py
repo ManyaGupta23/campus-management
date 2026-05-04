@@ -235,11 +235,61 @@ else:
             st.metric("Schedule", len(db["schedule"]))
 
         elif ch=="Manage Students":
-            st.dataframe(db["students"])
+    st.subheader("Students")
+    st.dataframe(db["students"])
 
+    st.write("➕ Add Student")
+    sid=st.text_input("Student ID")
+    name=st.text_input("Name")
+    gender=st.text_input("Gender")
+    course=st.text_input("Course")
+    year=st.text_input("Year")
+    section=st.text_input("Section")
+    admission_date=st.text_input("Admission Date")
+    attendance_percentage=st.text_input("Attendance %")
+    status=st.text_input("Status")
+    email=st.text_input("Email")
+
+    if st.button("Add Student"):
+        db["students"] = pd.concat([
+            db["students"],
+            pd.DataFrame([[sid,name,gender,course,year,section,admission_date,attendance_percentage,status,email]],
+                         columns=SCHEMA["students"])
+        ])
+        save(db)
+        st.success("Student Added")
+
+    st.write("❌ Delete Student")
+    del_id = st.text_input("Enter Student ID to delete")
+
+    if st.button("Delete Student"):
+        db["students"] = db["students"][db["students"]["student_id"]!=del_id]
+        save(db)
+        st.success("Student Deleted")
         elif ch=="Manage Faculty":
-            st.dataframe(db["faculty"])
+    st.subheader("Faculty")
+    st.dataframe(db["faculty"])
 
+    st.write("➕ Add Faculty")
+    fid=st.text_input("Faculty ID")
+    name=st.text_input("Name")
+    sub=st.text_input("Subject")
+
+    if st.button("Add Faculty"):
+        db["faculty"] = pd.concat([
+            db["faculty"],
+            pd.DataFrame([[fid,name,sub]], columns=SCHEMA["faculty"])
+        ])
+        save(db)
+        st.success("Faculty Added")
+
+    st.write("❌ Delete Faculty")
+    del_id = st.text_input("Enter Faculty ID to delete")
+
+    if st.button("Delete Faculty"):
+        db["faculty"] = db["faculty"][db["faculty"]["faculty_id"]!=del_id]
+        save(db)
+        st.success("Faculty Deleted")
         elif ch=="Manage Schedule":
             st.dataframe(db["schedule"])
 
@@ -263,11 +313,19 @@ else:
         faculty_id = str(st.session_state.link).strip()
 
         if ch=="My Schedule":
-            df = db["schedule"].copy()
-            df["faculty_id"] = df["faculty_id"].astype(str).str.strip()
-            my = df[df["faculty_id"]==faculty_id]
-            st.dataframe(my)
+    st.subheader("My Schedule")
 
+    df = db["schedule"].copy()
+
+    df["faculty_id"] = df["faculty_id"].astype(str).str.strip()
+    faculty_id = str(st.session_state.link).strip()
+
+    my = df[df["faculty_id"] == faculty_id]
+
+    if my.empty:
+        st.warning("No schedule found. Ask admin to add schedule.")
+    else:
+        st.dataframe(my)
         elif ch=="Marks":
             sid=st.text_input("Student ID")
             sub=st.text_input("Subject")
@@ -291,6 +349,33 @@ else:
             my = df[df["student_id"]==sid]
             st.dataframe(my)
 
+        elif ch=="My Attendance":
+    df = db["attendance"].copy()
+
+    df["student_id"] = df["student_id"].astype(str).str.strip()
+    sid = str(sid).strip()
+
+    my = df[df["student_id"] == sid]
+
+    if my.empty:
+        st.warning("No attendance data found")
+    else:
+        st.dataframe(my)
+
+        elif ch=="Certificate":
+    info = db["students"][db["students"]["student_id"].astype(str).str.strip()==sid]
+
+    name = info.iloc[0]["name"] if not info.empty else "Student"
+    course = info.iloc[0]["course"] if not info.empty else "Course"
+
+    st.write(f"Name: {name}")
+    st.write(f"Course: {course}")
+
+    if st.button("Download Certificate"):
+        f = certificate_pdf(sid,name,course)
+
+        with open(f,"rb") as file:
+            st.download_button("Download Certificate", file.read(), file_name=f)
         elif ch=="Report Card":
             df=db["results"].copy()
             df["student_id"] = df["student_id"].astype(str).str.strip()
