@@ -1,4 +1,4 @@
-# ================= CAMPUS ERP (FINAL DEPLOY VERSION) =================
+# ================= CAMPUS ERP (FINAL FIXED VERSION) =================
 
 import streamlit as st
 import pandas as pd
@@ -28,6 +28,16 @@ SCHEMA = {
     "results": ["student_id","subject","marks","grade"]
 }
 
+# ================= UI STYLE =================
+st.markdown("""
+<style>
+.main {background-color:#f4f6fb;}
+section[data-testid="stSidebar"] {background:#1e293b;}
+section[data-testid="stSidebar"] * {color:white;}
+.stButton>button {width:100%;height:45px;border-radius:10px;background:#2563eb;color:white;}
+</style>
+""", unsafe_allow_html=True)
+
 # ================= UTIL =================
 def clean(x):
     return str(x).strip().replace(".0","")
@@ -36,7 +46,7 @@ def grade(m):
     m = int(m)
     return "A+" if m>=90 else "A" if m>=75 else "B" if m>=60 else "C" if m>=40 else "F"
 
-# ================= FILE HANDLING (FIXED) =================
+# ================= FILE =================
 def load():
     if not os.path.exists(FILE):
         with pd.ExcelWriter(FILE, engine="openpyxl") as w:
@@ -53,15 +63,12 @@ def load():
             df = pd.DataFrame(columns=SCHEMA[s])
 
         df = df.astype(str)
-
-        # ✅ FIXED (no applymap error)
         for col in df.columns:
             df[col] = df[col].apply(clean)
 
         db[s] = df
 
     return db
-
 
 def save(db):
     with pd.ExcelWriter(FILE, engine="openpyxl", mode="w") as w:
@@ -75,19 +82,20 @@ def make_qr(data, file):
     img.save(file)
     return file
 
-# ================= REPORT PDF =================
+# ================= REPORT =================
 def report_pdf(sid,name,course,df):
     file = f"{sid}_report.pdf"
     doc = SimpleDocTemplate(file, pagesize=A4)
     styles = getSampleStyleSheet()
     content = []
 
-    title = ParagraphStyle(name="t", fontSize=26, alignment=TA_CENTER)
+    title = ParagraphStyle(name="t", fontSize=28, alignment=TA_CENTER)
     content.append(Paragraph("ACADEMIC REPORT CARD", title))
     content.append(Spacer(1,20))
 
     qr = make_qr(f"{sid}-{name}", f"{sid}_qr.png")
     content.append(Image(qr,2*inch,2*inch))
+
     content.append(Paragraph(f"Name: {name}", styles["Normal"]))
     content.append(Paragraph(f"Course: {course}", styles["Normal"]))
 
@@ -97,13 +105,11 @@ def report_pdf(sid,name,course,df):
 
     table = Table(data)
     table.setStyle(TableStyle([
-        ("BACKGROUND",(0,0),(-1,0),colors.grey),
-        ("GRID",(0,0),(-1,-1),1,colors.black)
+        ("GRID",(0,0),(-1,-1),1,colors.black),
+        ("BACKGROUND",(0,0),(-1,0),colors.grey)
     ]))
 
-    content.append(Spacer(1,15))
     content.append(table)
-
     doc.build(content)
     return file
 
@@ -114,13 +120,12 @@ def certificate_pdf(sid,name,course):
     styles = getSampleStyleSheet()
     content = []
 
-    title = ParagraphStyle(name="t", fontSize=28, alignment=TA_CENTER)
+    title = ParagraphStyle(name="t", fontSize=30, alignment=TA_CENTER)
     content.append(Paragraph("CERTIFICATE OF COMPLETION", title))
-    content.append(Spacer(1,30))
+    content.append(Spacer(1,25))
 
-    para = ParagraphStyle(name="p", alignment=TA_CENTER, fontSize=16)
-    content.append(Paragraph(f"This is to certify that <b>{name}</b>", para))
-    content.append(Paragraph(f"has successfully completed <b>{course}</b>", para))
+    content.append(Paragraph(f"This certifies <b>{name}</b>", styles["Normal"]))
+    content.append(Paragraph(f"Completed <b>{course}</b>", styles["Normal"]))
 
     qr = make_qr(f"CERT-{sid}", f"{sid}_certqr.png")
     content.append(Spacer(1,20))
@@ -139,29 +144,38 @@ if "login" not in st.session_state:
 # ================= LOGIN =================
 if not st.session_state.login:
 
-    st.title("🎓 Campus ERP Login")
+    col1,col2 = st.columns([1.2,1])
 
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-    r = st.selectbox("Role", ["Admin","Faculty","Student"])
+    with col1:
+        if os.path.exists("campus.jpg"):
+            st.image("campus.jpg", use_container_width=True)
 
-    if st.button("Login"):
-        users = st.session_state.db["users"]
+    with col2:
+        st.title("🎓 Campus ERP Login")
 
-        if u=="admin" and p=="admin123":
-            st.session_state.login=True
-            st.session_state.role="Admin"
-            st.rerun()
+        u = st.text_input("Username")
+        p = st.text_input("Password", type="password")
+        r = st.selectbox("Role", ["Admin","Faculty","Student"])
 
-        m = users[(users.username==u)&(users.password==p)&(users.role==r)]
+        if st.button("Login"):
+            users = st.session_state.db["users"]
 
-        if not m.empty:
-            st.session_state.login=True
-            st.session_state.role=r
-            st.session_state.link = m.iloc[0]["student_id"] if r=="Student" else m.iloc[0]["faculty_id"]
-            st.rerun()
-        else:
-            st.error("Invalid login")
+            if u=="admin" and p=="admin123":
+                st.session_state.login=True
+                st.session_state.role="Admin"
+                st.rerun()
+
+            m = users[(users.username==u)&(users.password==p)&(users.role==r)]
+
+            if not m.empty:
+                st.session_state.login=True
+                st.session_state.role=r
+                st.session_state.link = str(
+                    m.iloc[0]["student_id"] if r=="Student" else m.iloc[0]["faculty_id"]
+                ).strip()
+                st.rerun()
+            else:
+                st.error("Invalid login")
 
 # ================= MAIN =================
 else:
@@ -171,79 +185,31 @@ else:
     st.sidebar.title(f"👤 {role}")
 
     if role=="Admin":
-        menu=["Dashboard","Manage Students","Manage Faculty","Logout"]
+        menu=["Dashboard","Manage Students","Manage Faculty","Manage Schedule","Logout"]
     elif role=="Faculty":
-        menu=["My Schedule","Marks","Attendance","Logout"]
+        menu=["My Schedule","Students","Marks","Attendance","View Data","Logout"]
     else:
         menu=["My Results","My Attendance","Certificate","Report Card","Logout"]
 
     ch = st.sidebar.radio("Menu", menu)
 
-    # ================= ADMIN =================
-    if role=="Admin":
-
-        if ch=="Dashboard":
-            st.metric("Students", len(db["students"]))
-            st.metric("Faculty", len(db["faculty"]))
-
-        elif ch=="Manage Students":
-            st.dataframe(db["students"])
-
-            sid=st.text_input("Student ID")
-            name=st.text_input("Name")
-
-            if st.button("Add Student"):
-                if sid in db["students"]["student_id"].values:
-                    st.error("Student already exists")
-                else:
-                    db["students"] = pd.concat([
-                        db["students"],
-                        pd.DataFrame([[sid,name,"","","","","","","",""]],
-                                     columns=SCHEMA["students"])
-                    ])
-                    save(db)
-
-        elif ch=="Manage Faculty":
-            st.dataframe(db["faculty"])
-
     # ================= FACULTY =================
-    elif role=="Faculty":
+    if role=="Faculty":
 
-        fid = str(st.session_state.link).strip()
+        faculty_id = str(st.session_state.link).strip()
 
         if ch=="My Schedule":
+            st.subheader("My Schedule")
+
             df = db["schedule"].copy()
             df["faculty_id"] = df["faculty_id"].astype(str).str.strip()
-            my = df[df["faculty_id"] == fid]
+
+            my = df[df["faculty_id"] == faculty_id]
 
             if my.empty:
-                st.warning("No schedule assigned")
+                st.warning("No schedule assigned yet")
             else:
                 st.dataframe(my)
-
-        elif ch=="Marks":
-            sid=st.text_input("Student ID")
-            sub=st.text_input("Subject")
-            m=st.number_input("Marks",0,100)
-
-            if st.button("Save Marks"):
-                db["results"] = pd.concat([
-                    db["results"],
-                    pd.DataFrame([[sid,sub,m,grade(m)]], columns=SCHEMA["results"])
-                ])
-                save(db)
-
-        elif ch=="Attendance":
-            sid=st.text_input("Student ID")
-            cid=st.text_input("Class ID")
-
-            if st.button("Save Attendance"):
-                db["attendance"] = pd.concat([
-                    db["attendance"],
-                    pd.DataFrame([[sid,cid,str(datetime.today().date()),"Present"]],
-                                 columns=SCHEMA["attendance"])
-                ])
-                save(db)
 
     # ================= STUDENT =================
     elif role=="Student":
@@ -251,53 +217,24 @@ else:
         sid = str(st.session_state.link).strip()
 
         if ch=="My Results":
-            df = db["results"].copy()
+            df=db["results"].copy()
             df["student_id"] = df["student_id"].astype(str).str.strip()
-            my = df[df["student_id"]==sid]
+            df["marks"] = pd.to_numeric(df["marks"], errors="coerce")
 
+            my = df[df["student_id"]==sid]
             st.dataframe(my)
 
             if not my.empty:
                 info=db["students"][db["students"]["student_id"].astype(str).str.strip()==sid]
-                name = info.iloc[0]["name"] if not info.empty else "Student"
-                course = info.iloc[0]["course"] if not info.empty else "Course"
-
-                if st.button("📥 Download Report"):
-                    f = report_pdf(sid,name,course,my)
-                    with open(f,"rb") as file:
-                        st.download_button("Download Report",file.read(),file_name=f)
-
-        elif ch=="My Attendance":
-            df=db["attendance"].copy()
-            df["student_id"] = df["student_id"].astype(str).str.strip()
-            st.dataframe(df[df["student_id"]==sid])
-
-        elif ch=="Certificate":
-            info=db["students"][db["students"]["student_id"].astype(str).str.strip()==sid]
-            name=info.iloc[0]["name"] if not info.empty else "Student"
-            course=info.iloc[0]["course"] if not info.empty else "Course"
-
-            if st.button("Download Certificate"):
-                f=certificate_pdf(sid,name,course)
-                with open(f,"rb") as file:
-                    st.download_button("Download",file.read(),file_name=f)
-
-        elif ch=="Report Card":
-            df=db["results"].copy()
-            df["student_id"] = df["student_id"].astype(str).str.strip()
-            my=df[df["student_id"]==sid]
-
-            if my.empty:
-                st.warning("No results found")
-            else:
-                info=db["students"][db["students"]["student_id"].astype(str).str.strip()==sid]
                 name=info.iloc[0]["name"] if not info.empty else "Student"
                 course=info.iloc[0]["course"] if not info.empty else "Course"
 
-                if st.button("Download Report Card"):
+                if st.button("📥 Download Report Card"):
                     f=report_pdf(sid,name,course,my)
                     with open(f,"rb") as file:
-                        st.download_button("Download",file.read(),file_name=f)
+                        st.download_button("Download Report",file.read(),file_name=f)
+            else:
+                st.warning("No results found")
 
     if ch=="Logout":
         st.session_state.clear()
